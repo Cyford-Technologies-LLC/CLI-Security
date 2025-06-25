@@ -9,13 +9,11 @@ require_once BASE_PATH . '/vendor/autoload.php';
 $config = require BASE_PATH . '/config.php';
 use Cyford\Security\Classes\Logger;
 use Cyford\Security\Classes\CommandLineArguments;
-use Cyford\Security\Classes\ApiClient;
 use Cyford\Security\Classes\Postfix;
 use Cyford\Security\Classes\Fail2Ban;
 use Cyford\Security\Classes\Firewall;
-use Cyford\Security\Classes\SpamFilter ;
+use Cyford\Security\Classes\SpamFilter;
 use Cyford\Security\Classes\Systems;
-
 
 // Initialize Logger
 $logger = new Logger($config);
@@ -53,61 +51,68 @@ $cliArgs = initializeService(
     $logger
 );
 
-// Initialize Systems (for system-related details like OS, memory, etc.)
+// If CommandLineArguments initialization failed, do not proceed
+if (!$cliArgs) {
+    throw new RuntimeException('Failed to initialize CommandLineArguments.');
+}
+
+$inputType = $cliArgs->getInputType(); // Get input type from CLI arguments
+$logger->info("Input type: {$inputType}");
+
+// Initialize Systems (optional system-level information, like OS or disk stats)
 $systems = initializeService(
     'Systems',
     static fn() => new Systems(),
     $logger
 );
 
-// Log system information for reference (optional)
-if ($systems) {
-    $osInfo = $systems->getOSInfo();
-    $logger->info('System Information: ' . json_encode($osInfo));
-
-    $diskUsage = $systems->getDiskUsage();
-    $logger->info('Disk Usage: ' . json_encode($diskUsage));
-}
-
-// Initialize Postfix (required for spam filtering integration)
-$postfix = initializeService('Postfix', static fn() => new Postfix($config), $logger);
-
-// If Postfix is successfully initialized, set up the spam filter
+// Initialize Postfix if input type is 'postfix'
+$postfix = null;
 $spamFilter = null;
-if ($postfix) {
-    $logger->info('Postfix is installed. Checking configuration...');
+if ($inputType === 'postfix') {
+    $postfix = initializeService('Postfix', static fn() => new Postfix($config), $logger);
 
-    if ($postfix->checkConfig()) {
-        $logger->info('Postfix configuration verified.');
-    } else {
-        $logger->warning('Postfix configuration is incomplete, attempting to fix...');
-        $postfix->autoConfig(); // Automatically configure missing settings.
+    if ($postfix) {
+        // Set up Postfix-specific configurations and spam filter
+        $logger->info('Postfix is installed. Checking configuration...');
 
         if ($postfix->checkConfig()) {
-            $logger->info('Postfix has been successfully configured.');
+            $logger->info('Postfix configuration verified.');
         } else {
-            throw new RuntimeException('Postfix configuration failed. Please check logs for details.');
+            $logger->warning('Postfix configuration is incomplete, attempting to fix...');
+            $postfix->autoConfig();
+
+            if ($postfix->checkConfig()) {
+                $logger->info('Postfix has been successfully configured.');
+            } else {
+                throw new RuntimeException('Postfix configuration failed. Please check logs for details.');
+            }
+        }
+
+        $spamFilter = initializeService('SpamFilter', static fn() => new SpamFilter(), $logger);
+    }
+}
+
+// Initialize Fail2Ban only if input type is 'fail2ban'
+$fail2Ban = null;
+if ($inputType === 'fail2ban') {
+    $fail2Ban = initializeService(
+        'Fail2Ban',
+        static fn() => new Fail2Ban(),
+        $logger
+    );
+
+    if ($fail2Ban) {
+        try {
+            $enabledJails = $fail2Ban->getEnabledJails();
+            $logger->info('Enabled Fail2Ban Jails: ' . implode(', ', $enabledJails));
+        } catch (RuntimeException $e) {
+            $logger->warning("Could not retrieve Fail2Ban jails: " . $e->getMessage());
         }
     }
 }
 
-// Initialize Fail2Ban
-$fail2Ban = initializeService(
-    'Fail2Ban',
-    static fn() => new Fail2Ban(),
-    $logger
-);
-
-if ($fail2Ban) {
-    try {
-        $enabledJails = $fail2Ban->getEnabledJails();
-        $logger->info('Enabled Fail2Ban Jails: ' . implode(', ', $enabledJails));
-    } catch (RuntimeException $e) {
-        $logger->warning("Could not retrieve Fail2Ban jails: " . $e->getMessage());
-    }
-}
-
-// Initialize Firewall
+// Initialize Firewall (optional for all input types)
 $firewall = initializeService(
     'Firewall',
     static fn() => new Firewall(),
@@ -123,10 +128,10 @@ if ($firewall) {
     }
 }
 
-// Log the successful completion of initialization
+// Log initialization completion
 $logger->info('Application initialization completed successfully.');
 
-// Return the context for application runtime
+// Return initialized components to the main script
 return [
     'config'     => $config,
     'logger'     => $logger,
