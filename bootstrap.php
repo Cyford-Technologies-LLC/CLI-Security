@@ -47,7 +47,18 @@ if (!empty($config['errors']['report_errors']) && $config['errors']['report_erro
 // Initialize Command-Line Arguments
 $cliArgs = initializeService(
     'CommandLineArguments',
-    static fn() => new CommandLineArguments($argv),
+    static function () use ($argv, $logger) {
+        try {
+            if (empty($argv)) {
+                $logger->error('No arguments provided to the script.');
+                throw new RuntimeException('No arguments provided.');
+            }
+            return new CommandLineArguments($argv);
+        } catch (RuntimeException $e) {
+            $logger->error('Failed to initialize CommandLineArguments: ' . $e->getMessage());
+            throw $e;
+        }
+    },
     $logger
 );
 
