@@ -31,6 +31,7 @@ class Logger
     private function ensureDirectory(string $directory): void
     {
         if (!is_dir($directory)) {
+            echo "Creating directory: {$directory}" . PHP_EOL;
             mkdir($directory, 0755, true);
         }
     }
