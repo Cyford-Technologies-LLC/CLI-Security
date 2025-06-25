@@ -151,17 +151,4 @@ class Postfix
         return $output;
     }
 
-    public function reload(): void
-    {
-        $command = "{$this->postfixCommand} reload";
-        echo "Running Postfix reload...\n";
-        $output = shell_exec($command);
-
-        if (!$output) {
-            echo "WARNING: Reload command returned empty output. Verify manually.\n";
-            echo "Try running 'sudo postfix reload'.\n";
-        } else {
-            echo "Postfix reloaded successfully:\n$output\n";
-        }
-    }
 }
