@@ -24,16 +24,16 @@ firewall, Fail2Ban, and Postfix to provide a secure and automated reporting fram
 Make sure your system is updated and has the required dependencies installed.
 
 For Debian/Ubuntu:
-sh sudo apt update && sudo apt install php-cli unzip curl git -y
+sudo apt update && sudo apt install php-cli unzip curl git -y
 
 For Red Hat-based systems (RHEL/CentOS/Fedora):
-sh sudo yum install php-cli unzip curl git -y
+sudo yum install php-cli unzip curl git -y
 
 ### **2. Install Composer**
 
 Install Composer (PHP dependency manager):
-sh curl -sS [https://getcomposer.org/installer](https://getcomposer.org/installer) | php sudo mv composer.phar
-/usr/local/bin/composer
+curl -sS https://getcomposer.org/installer | php
+sudo mv composer.phar /usr/local/bin/composer/usr/local/bin/composer
 
 Verify Composer installation:
 

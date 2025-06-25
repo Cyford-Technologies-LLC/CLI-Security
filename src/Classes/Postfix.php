@@ -5,6 +5,7 @@ class Postfix
     private string $mainConfigPath;
     private string $masterConfigPath;
     private string $postfixCommand;
+    private string $backupDirectory;
     private bool $allowFileModification;
 
     public function __construct(array $config)
@@ -12,10 +13,17 @@ class Postfix
         $this->mainConfigPath = $config['postfix']['main_config'] ?? '/etc/postfix/main.cf';
         $this->masterConfigPath = $config['postfix']['master_config'] ?? '/etc/postfix/master.cf';
         $this->postfixCommand = $config['postfix']['postfix_command'] ?? '/usr/sbin/postfix';
+        $this->backupDirectory = $config['postfix']['backup_directory'] ?? '/var/backups/postfix';
         $this->allowFileModification = $config['postfix']['allow_modification'] ?? false;
 
+        // Ensure Postfix command exists
         if (!file_exists($this->postfixCommand)) {
             throw new RuntimeException("Postfix command not found at: {$this->postfixCommand}. Check your configuration.");
+        }
+
+        // Ensure the backup directory exists
+        if (!is_dir($this->backupDirectory)) {
+            mkdir($this->backupDirectory, 0755, true);
         }
     }
 
@@ -62,14 +70,16 @@ class Postfix
 
         echo "Applying missing configurations...\n";
 
-        // Add content_filter to main.cf
+        // Backup and update main.cf
         if (!strpos(file_get_contents($this->mainConfigPath), 'content_filter = security-filter:dummy')) {
+            $this->backupFile($this->mainConfigPath);
             file_put_contents($this->mainConfigPath, "\ncontent_filter = security-filter:dummy\n", FILE_APPEND);
             echo " - Added 'content_filter' to {$this->mainConfigPath}.\n";
         }
 
-        // Add security-filter to master.cf
+        // Backup and update master.cf
         if (!strpos(file_get_contents($this->masterConfigPath), 'security-filter unix - n n - - pipe')) {
+            $this->backupFile($this->masterConfigPath);
             file_put_contents(
                 $this->masterConfigPath,
                 "\nsecurity-filter unix - n n - - pipe\n  flags=Rq user=report-ip argv=/usr/local/bin/cyford-report --ips=\${client_address} --categories=3\n",
@@ -84,29 +94,26 @@ class Postfix
     }
 
     /**
-     * Parse email headers and extract relevant details.
+     * Create a timestamped backup of a file before modifying it.
      *
-     * @param string $emailHeaders Raw email headers as a string.
-     * @return array Parsed header details (From, To, Subject, IP, etc.).
+     * @param string $filePath Path to the file to back up.
+     * @return void
      */
-    public function parseHeaders(string $emailHeaders): array
+    private function backupFile(string $filePath): void
     {
-        $parsed = [];
-
-        $lines = explode("\n", $emailHeaders);
-        foreach ($lines as $line) {
-            if (stripos($line, 'From:') === 0) {
-                $parsed['from'] = trim(substr($line, 5));
-            } elseif (stripos($line, 'To:') === 0) {
-                $parsed['to'] = trim(substr($line, 3));
-            } elseif (stripos($line, 'Subject:') === 0) {
-                $parsed['subject'] = trim(substr($line, 8));
-            } elseif (stripos($line, 'Received:') === 0 && preg_match('/\[(\d+\.\d+\.\d+\.\d+)\]/', $line, $matches)) {
-                $parsed['ip'] = $matches[1];
-            }
+        if (!file_exists($filePath)) {
+            throw new RuntimeException("File not found for backup: {$filePath}");
         }
 
-        return $parsed;
+        $timestamp = date('Ymd_His');
+        $fileName = basename($filePath);
+        $backupPath = "{$this->backupDirectory}/{$fileName}.backup_{$timestamp}";
+
+        if (!copy($filePath, $backupPath)) {
+            throw new RuntimeException("Failed to create backup for: {$filePath}");
+        }
+
+        echo " - Backup created: {$backupPath}\n";
     }
 
     /**
