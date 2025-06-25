@@ -150,6 +150,19 @@ class Postfix
 
         echo "Postfix reload output: {$output}\n";
     }
+
+    function parseHeaders($rawHeaders)
+    {
+        $headers = [];
+        $lines = explode("\n", $rawHeaders);
+        foreach ($lines as $line) {
+            if (strpos($line, ':') !== false) {
+                list($key, $value) = explode(':', $line, 2);
+                $headers[trim($key)] = trim($value);
+            }
+        }
+        return $headers;
+    }
     /**
      * Get Postfix service status.
      *
