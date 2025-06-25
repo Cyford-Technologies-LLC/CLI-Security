@@ -1,6 +1,8 @@
 <?php
 namespace Cyford\Security\Classes;
 
+use RuntimeException;
+
 class CommandLineArguments
 {
     private array $arguments;
