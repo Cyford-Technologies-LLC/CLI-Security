@@ -1,8 +1,6 @@
 <?php
 namespace Cyford\Security\Classes;
 
-
-
 class Logger
 {
     private string $logFilePath;
@@ -11,10 +9,15 @@ class Logger
     public function __construct(array $config)
     {
         // Get general log file path and error log path from config
-        $this->logFilePath = $config['log']['file_path'] ?? BASE_PATH . '/logs/application.log';
-        $this->errorLogFilePath = $config['errors']['error_log_location'] ?? BASE_PATH . '/logs/errors/error.log';
+        $defaultBasePath = '/tmp/cyford-security'; // Fallback path if provided paths are not writable
+        $logPath = $config['log']['file_path'] ?? "$defaultBasePath/application.log";
+        $errorLogPath = $config['errors']['error_log_location'] ?? "$defaultBasePath/errors/error.log";
 
-        // Ensure the log directory exists
+        // Validate or fallback to writable paths
+        $this->logFilePath = $this->validatePath($logPath, "$defaultBasePath/application.log");
+        $this->errorLogFilePath = $this->validatePath($errorLogPath, "$defaultBasePath/errors/error.log");
+
+        // Ensure directory structure for writable paths
         $this->ensureDirectory(dirname($this->logFilePath));
         $this->ensureDirectory(dirname($this->errorLogFilePath));
     }
@@ -33,6 +36,27 @@ class Logger
     }
 
     /**
+     * Validate file path and ensure it is writable.
+     * Falls back to a default file path if validation fails.
+     *
+     * @param string $path
+     * @param string $fallbackPath
+     * @return string
+     */
+    private function validatePath(string $path, string $fallbackPath): string
+    {
+        $dir = dirname($path);
+
+        // Check if the directory is writable
+        if (!is_dir($dir) || !is_writable($dir)) {
+            $this->ensureDirectory(dirname($fallbackPath));
+            return $fallbackPath;
+        }
+
+        return $path;
+    }
+
+    /**
      * Log a generic message.
      *
      * @param string $level E.g., INFO, WARNING, ERROR.
@@ -46,7 +70,13 @@ class Logger
         $logMessage = "[{$timestamp}] {$level}: {$message}" . PHP_EOL;
 
         $filePath = $isErrorLog ? $this->errorLogFilePath : $this->logFilePath;
-        file_put_contents($filePath, $logMessage, FILE_APPEND);
+
+        try {
+            file_put_contents($filePath, $logMessage, FILE_APPEND);
+        } catch (\Exception $e) {
+            // Fallback: Write to STDERR
+            fwrite(STDERR, "[Logger Error] Failed to write log: {$e->getMessage()}" . PHP_EOL);
+        }
     }
 
     /**
