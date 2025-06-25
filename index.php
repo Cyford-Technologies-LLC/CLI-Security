@@ -1,44 +1,85 @@
 <?php
 
 try {
-    // Load the bootstrap file to get shared components
+    // Load the bootstrap file for shared dependencies
     $bootstrap = require __DIR__ . '/bootstrap.php';
-    $cliArgs = $bootstrap['cliArgs']; // Access CommandLineArguments instance
+    $cliArgs = $bootstrap['cliArgs'];
     $logger = $bootstrap['logger'];
     $postfix = $bootstrap['postfix'];
     $spamFilter = $bootstrap['spamFilter'];
 
-    // Get the input type (already validated in CommandLineArguments)
+    // Get the input type (already verified in CommandLineArguments)
     $inputType = $cliArgs->getInputType();
-
     $logger->info("Processing input type: {$inputType}");
 
     switch ($inputType) {
         case 'postfix':
-            // Handle Postfix input
+            // Handle Postfix passed data
             $emailData = file_get_contents('php://stdin');
             if (!$emailData) {
                 throw new RuntimeException("No email data received from Postfix.");
             }
 
-            // Parse headers and body from email input
-            $emailLines = explode("\n\n", $emailData, 2); // Separate headers and body
-            $headersData = $emailLines[0];
+            // Separate headers and body
+            $emailLines = explode("\n\n", $emailData, 2);
+            $headersData = $emailLines[0] ?? '';
             $bodyData = $emailLines[1] ?? '';
-            $parsedHeaders = $postfix->parseHeaders($headersData);
 
+            // Parse the headers
+            $parsedHeaders = $postfix->parseHeaders($headersData);
             $logger->info("Parsed headers: " . json_encode($parsedHeaders));
 
-            // Run SpamFilter analysis
-            if ($spamFilter->isSpam($parsedHeaders, $bodyData)) {
-                $logger->warning('Email detected as spam.');
+            // Check if the email is spam
+            $isSpam = $spamFilter->isSpam($parsedHeaders, $bodyData);
+            if ($isSpam) {
+                $logger->warning('Email detected as spam. Processing halted.');
+                // You can reject or quarantine the email here if needed.
+                exit(0); // Gracefully end without further processing
             } else {
-                $logger->info('Email is clean.');
+                $logger->info('Email is clean. Continuing processing...');
+            }
+
+            // Requeue the email back into Postfix
+            $sendmailPath = '/usr/sbin/sendmail'; // Update this if your system has a different path
+            $recipient = $cliArgs->get('recipient', ''); // Grab the recipient via CLI arguments
+
+            if (empty($recipient)) {
+                throw new RuntimeException("Recipient not provided. Cannot requeue email.");
+            }
+
+            $requeueCommand = "{$sendmailPath} -i -- {$recipient}";
+            $process = proc_open($requeueCommand, [
+                ['pipe', 'r'], // stdin
+                ['pipe', 'w'], // stdout
+                ['pipe', 'w'], // stderr
+            ], $pipes);
+
+            if (is_resource($process)) {
+                fwrite($pipes[0], $emailData); // Pass the original email to the input pipe
+                fclose($pipes[0]);
+
+                // Read output if needed
+                $output = stream_get_contents($pipes[1]);
+                fclose($pipes[1]);
+
+                // Read errors if any
+                $errors = stream_get_contents($pipes[2]);
+                fclose($pipes[2]);
+
+                $returnCode = proc_close($process);
+                if ($returnCode !== 0) {
+                    $logger->error("Failed to requeue email: {$errors}");
+                    throw new RuntimeException("Requeueing failed. Return code: {$returnCode}");
+                }
+
+                $logger->info("Email successfully passed back to Postfix for further processing.");
+            } else {
+                throw new RuntimeException("Could not open process to requeue email.");
             }
             break;
 
         case 'fail2ban':
-            // Handle Fail2Ban input via arguments
+            // Handle Fail2Ban input
             $ips = $cliArgs->get('ips', '');
             if (!$ips) {
                 throw new RuntimeException("No IPs provided for Fail2Ban.");
@@ -47,16 +88,16 @@ try {
             $ipsArray = explode(',', $ips);
             $logger->info("Received IPs from Fail2Ban: " . implode(', ', $ipsArray));
 
-            // Process each IP with desired logic
+            // Process each IP here
             foreach ($ipsArray as $ip) {
                 $logger->info("Processing IP: {$ip}");
-                // Add IP handling logic here
+                // IP processing logic
             }
             break;
 
         case 'manual':
-            // Handle manual or other types of input
-            $logger->info('Handling manual input.');
+            // Handle manual input
+            $logger->info('Handling manual input type.');
             break;
 
         default:
