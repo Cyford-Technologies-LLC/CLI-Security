@@ -1,4 +1,7 @@
 <?php
+namespace Cyford\Security\Classes;
+namespace Cyford\Security\Classes;
+
 
 class Logger
 {

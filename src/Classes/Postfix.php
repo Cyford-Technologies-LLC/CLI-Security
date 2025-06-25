@@ -1,4 +1,5 @@
 <?php
+namespace Cyford\Security\Classes;
 
 class Postfix
 {

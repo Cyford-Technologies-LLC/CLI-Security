@@ -7,6 +7,7 @@ define('BASE_PATH', __DIR__);
 // Load dependencies and configuration
 require_once BASE_PATH . '/vendor/autoload.php';
 $config = require BASE_PATH . '/config.php';
+use Cyford\Security\Classes\Logger;
 
 // Initialize Logger
 $logger = new Logger($config);

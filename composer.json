@@ -1,5 +1,19 @@
 {
+    "name": "cyford/security",
+    "description": "Making our digital world a safer place",
     "require": {
-        "monolog/monolog": "^3.9"
-    }
+        "php": "8.0",
+        "guzzlehttp/guzzle": "^7.9",
+        "symfony/monolog-bundle": "^3.10"
+    },
+    "autoload": {
+        "psr-4": {
+            "Cyford\\Security\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Allen Ford"
+        }
+    ]
 }
