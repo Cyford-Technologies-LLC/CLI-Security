@@ -65,6 +65,12 @@ function processEmailFromPostfix($postfix, $spamFilter, $logger): void
     list($headers, $body) = parseEmail($emailData);
     $logger->info("Parsed headers: " . json_encode($headers));
 
+    // Check if the email has already been processed by the security filter
+    if (!empty($headers['X-Processed-By-Security-Filter'])) {
+        $logger->info("Email already processed by the security filter. Skipping further processing.");
+        exit(0); // Stop further processing
+    }
+
     // Detect spam using SpamFilter
     $isSpam = $spamFilter->isSpam($headers, $body);
     if ($isSpam) {
@@ -81,14 +87,9 @@ function processEmailFromPostfix($postfix, $spamFilter, $logger): void
         throw new RuntimeException("Recipient not found in email headers.");
     }
 
-    // Handle potential cases of multiple recipients
-    $recipient = extractPrimaryRecipient($recipient);
-    $logger->info("Recipient resolved: {$recipient}");
-
     // Requeue email back to Postfix
     requeueEmail($emailData, $recipient, $logger);
 }
-
 function extractPrimaryRecipient(string $toHeader): string
 {
     $recipients = explode(',', $toHeader);
@@ -150,10 +151,10 @@ function requeueEmail(string $emailData, string $recipient, $logger): void
         throw new InvalidArgumentException($message);
     }
 
-    // Ensure emailData contains a 'To' header with the recipient
-    if (!preg_match('/^To: .+/m', $emailData)) {
-        $logger->info("Adding 'To' header to email data for recipient: {$recipient}");
-        $emailData = "To: {$recipient}\r\n" . $emailData;
+    // Add custom header to prevent reprocessing
+    if (!preg_match('/^X-Processed-By-Security-Filter:/m', $emailData)) {
+        $logger->info("Adding 'X-Processed-By-Security-Filter' header to prevent reprocessing.");
+        $emailData = "X-Processed-By-Security-Filter: true\r\n" . $emailData;
     }
 
     $requeueCommand = "{$sendmailPath} -i -- {$recipient}";
@@ -167,17 +168,14 @@ function requeueEmail(string $emailData, string $recipient, $logger): void
     ], $pipes);
 
     if (is_resource($process)) {
-        // Write email data to stdin
         fwrite($pipes[0], $emailData);
         fclose($pipes[0]);
 
-        // Capture process output
         $output = stream_get_contents($pipes[1]);
         $errors = stream_get_contents($pipes[2]);
         fclose($pipes[1]);
         fclose($pipes[2]);
 
-        // Get exit code
         $returnCode = proc_close($process);
         if ($returnCode !== 0) {
             $error = "Failed to requeue email. Exit code: {$returnCode}. Stderr: {$errors}.";
@@ -191,7 +189,6 @@ function requeueEmail(string $emailData, string $recipient, $logger): void
         throw new RuntimeException("Could not open process to requeue email.");
     }
 }
-
 
 /**
  * Process IP input from Fail2Ban.
