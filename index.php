@@ -50,6 +50,7 @@ try {
  * @return void
  * @throws RuntimeException
  */
+
 function processEmailFromPostfix($postfix, $spamFilter, $logger): void
 {
     $logger->info("Processing email received from Postfix...");
@@ -75,21 +76,40 @@ function processEmailFromPostfix($postfix, $spamFilter, $logger): void
     $isSpam = $spamFilter->isSpam($headers, $body);
     if ($isSpam) {
         $logger->warning("Email flagged as spam. Processing terminated.");
-        exit(0); // Gracefully end processing
+        exit(0); // Gracefully terminate
     }
 
     $logger->info("Email is clean of spam. Proceeding with requeue.");
 
-    // Extract recipient from headers
-    $recipient = $headers['To'] ?? null;
+    // Extract recipient from 'To' header
+    $recipient = extractEmailAddress($headers['To'] ?? '');
     if (empty($recipient)) {
-        $logger->error("Recipient not found in email headers. Headers: " . json_encode($headers));
-        throw new RuntimeException("Recipient not found in email headers.");
+        $logger->error("Recipient not found or invalid in email headers. Headers: " . json_encode($headers));
+        throw new RuntimeException("Recipient not found or invalid in email headers.");
     }
+    $logger->info("Recipient resolved: {$recipient}");
 
     // Requeue email back to Postfix
     requeueEmail($emailData, $recipient, $logger);
 }
+
+function extractEmailAddress(string $toHeader): string
+{
+    // Match the email address using a regular expression
+    if (preg_match('/<([^>]+)>/', $toHeader, $matches)) {
+        // Extract email from formats containing a display name
+        return $matches[1];
+    }
+
+    // If no angle brackets (<, >), assume the header contains only the email
+    if (filter_var($toHeader, FILTER_VALIDATE_EMAIL)) {
+        return $toHeader;
+    }
+
+    // Invalid format, return an empty string
+    return '';
+}
+
 function extractPrimaryRecipient(string $toHeader): string
 {
     $recipients = explode(',', $toHeader);
@@ -144,9 +164,9 @@ function requeueEmail(string $emailData, string $recipient, $logger): void
 {
     $sendmailPath = '/usr/sbin/sendmail';
 
-    // Validate recipient email
+    // Ensure the recipient is valid
     if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
-        $message = "Invalid recipient email: {$recipient}";
+        $message = "Invalid recipient email after extraction: {$recipient}";
         $logger->error($message);
         throw new InvalidArgumentException($message);
     }
@@ -189,7 +209,6 @@ function requeueEmail(string $emailData, string $recipient, $logger): void
         throw new RuntimeException("Could not open process to requeue email.");
     }
 }
-
 /**
  * Process IP input from Fail2Ban.
  *
