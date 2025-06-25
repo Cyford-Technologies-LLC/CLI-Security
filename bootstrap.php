@@ -88,8 +88,8 @@ if ($inputType === 'postfix') {
                 throw new RuntimeException('Postfix configuration failed. Please check logs for details.');
             }
         }
+        $spamFilter = initializeService('SpamFilter', static fn() => new SpamFilter($config), $logger);
 
-        $spamFilter = initializeService('SpamFilter', static fn() => new SpamFilter(), $logger);
     }
 }
 
