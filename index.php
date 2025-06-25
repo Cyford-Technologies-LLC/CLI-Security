@@ -41,11 +41,38 @@ try {
 
             // Requeue the email back into Postfix
             $sendmailPath = '/usr/sbin/sendmail'; // Update this if your system has a different path
-            $recipient = $cliArgs->get('recipient', ''); // Grab the recipient via CLI arguments
+
+
+
+            $recipient = '';
+
+            // Read email data from stdin
+            $emailData = file_get_contents('php://stdin');
+            if (!$emailData) {
+                throw new RuntimeException("No email data received from Postfix.");
+            }
+
+            // Log the raw contents of stdin to a file for debugging
+            file_put_contents('/var/log/maillog', $emailData);
+
+
+            // Separate headers and body
+            $emailLines = explode("\n\n", $emailData, 2);
+            $headersData = $emailLines[0] ?? '';
+            $bodyData = $emailLines[1] ?? '';
+
+            // Parse the headers to extract recipient
+            $parsedHeaders = $postfix->parseHeaders($headersData);
+            $recipient = $parsedHeaders['To'] ?? ''; // Extract recipient from To header
 
             if (empty($recipient)) {
-                throw new RuntimeException("Recipient not provided. Cannot requeue email.");
+                throw new RuntimeException("Recipient not provided in email headers.");
             }
+
+            $logger->info("Recipient extracted from email headers: {$recipient}");
+
+
+
 
             $requeueCommand = "{$sendmailPath} -i -- {$recipient}";
             $process = proc_open($requeueCommand, [
