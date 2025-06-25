@@ -17,8 +17,12 @@ return [
         'email' => '',  // Account email for login
         'password' => '',             // Account password for login
     ],
+    'log' => [
+        'file_path' => '/var/log/cyford-security/application.log',
+    ],
+
     'errors' => [
         'report_errors' => 1,
-        'error_log_location' =>  __DIR__ . '/errors/error.log',
+        'error_log_location' =>  __DIR__ . '/var/log/cyford-security/errors/error.log',
     ],
 ];
