@@ -1,139 +1,178 @@
 <?php
 
 try {
-    // Load the bootstrap file for shared dependencies
+    // Load dependencies and configuration
     $bootstrap = require __DIR__ . '/bootstrap.php';
     $cliArgs = $bootstrap['cliArgs'];
     $logger = $bootstrap['logger'];
     $postfix = $bootstrap['postfix'];
     $spamFilter = $bootstrap['spamFilter'];
 
-    // Get the input type (already verified in CommandLineArguments)
+    // Determine the input type
     $inputType = $cliArgs->getInputType();
-    $logger->info("Processing input type: {$inputType}");
+    $logger->info("Starting processing. Input type: {$inputType}");
 
     switch ($inputType) {
         case 'postfix':
-            // Handle Postfix passed data
-            $emailData = file_get_contents('php://stdin');
-            if (!$emailData) {
-                throw new RuntimeException("No email data received from Postfix.");
-            }
-
-            // Separate headers and body
-            $emailLines = explode("\n\n", $emailData, 2);
-            $headersData = $emailLines[0] ?? '';
-            $bodyData = $emailLines[1] ?? '';
-
-            // Parse the headers
-            $parsedHeaders = $postfix->parseHeaders($headersData);
-            $logger->info("Parsed headers: " . json_encode($parsedHeaders));
-
-            // Check if the email is spam
-            $isSpam = $spamFilter->isSpam($parsedHeaders, $bodyData);
-            if ($isSpam) {
-                $logger->warning('Email detected as spam. Processing halted.');
-                // You can reject or quarantine the email here if needed.
-                exit(0); // Gracefully end without further processing
-            } else {
-                $logger->info('Email is clean. Continuing processing...');
-            }
-
-            // Requeue the email back into Postfix
-            $sendmailPath = '/usr/sbin/sendmail'; // Update this if your system has a different path
-
-
-
-            $recipient = '';
-
-            // Read email data from stdin
-            $emailData = file_get_contents('php://stdin');
-            if (!$emailData) {
-                throw new RuntimeException("No email data received from Postfix.");
-            }
-
-            // Log the raw contents of stdin to a file for debugging
-            file_put_contents('/var/log/maillog', $emailData);
-
-
-            // Separate headers and body
-            $emailLines = explode("\n\n", $emailData, 2);
-            $headersData = $emailLines[0] ?? '';
-            $bodyData = $emailLines[1] ?? '';
-
-            // Parse the headers to extract recipient
-            $parsedHeaders = $postfix->parseHeaders($headersData);
-            $recipient = $parsedHeaders['To'] ?? ''; // Extract recipient from To header
-
-            if (empty($recipient)) {
-                throw new RuntimeException("Recipient not provided in email headers.");
-            }
-
-            $logger->info("Recipient extracted from email headers: {$recipient}");
-
-
-
-
-            $requeueCommand = "{$sendmailPath} -i -- {$recipient}";
-            $process = proc_open($requeueCommand, [
-                ['pipe', 'r'], // stdin
-                ['pipe', 'w'], // stdout
-                ['pipe', 'w'], // stderr
-            ], $pipes);
-
-            if (is_resource($process)) {
-                fwrite($pipes[0], $emailData); // Pass the original email to the input pipe
-                fclose($pipes[0]);
-
-                // Read output if needed
-                $output = stream_get_contents($pipes[1]);
-                fclose($pipes[1]);
-
-                // Read errors if any
-                $errors = stream_get_contents($pipes[2]);
-                fclose($pipes[2]);
-
-                $returnCode = proc_close($process);
-                if ($returnCode !== 0) {
-                    $logger->error("Failed to requeue email: {$errors}");
-                    throw new RuntimeException("Requeueing failed. Return code: {$returnCode}");
-                }
-
-                $logger->info("Email successfully passed back to Postfix for further processing.");
-            } else {
-                throw new RuntimeException("Could not open process to requeue email.");
-            }
+            // Handle email input from Postfix
+            processEmailFromPostfix($postfix, $spamFilter, $logger);
             break;
 
         case 'fail2ban':
-            // Handle Fail2Ban input
-            $ips = $cliArgs->get('ips', '');
-            if (!$ips) {
-                throw new RuntimeException("No IPs provided for Fail2Ban.");
-            }
-
-            $ipsArray = explode(',', $ips);
-            $logger->info("Received IPs from Fail2Ban: " . implode(', ', $ipsArray));
-
-            // Process each IP here
-            foreach ($ipsArray as $ip) {
-                $logger->info("Processing IP: {$ip}");
-                // IP processing logic
-            }
+            // Handle IPs provided by Fail2Ban
+            processFail2BanInput($cliArgs, $logger);
             break;
 
         case 'manual':
-            // Handle manual input
-            $logger->info('Handling manual input type.');
+            // Handle manual input type
+            $logger->info("Processing manual input...");
             break;
 
         default:
-            throw new RuntimeException("Unhandled input type: {$inputType}");
+            throw new RuntimeException("Unknown input type: {$inputType}");
     }
 
     echo "Script executed successfully.\n";
+    exit(0);
 
 } catch (Exception $e) {
+    // Handle global script errors
     echo "Error: " . $e->getMessage() . "\n";
     exit(1);
+}
+
+/**
+ * Process emails passed by Postfix.
+ *
+ * @param object $postfix Postfix utility instance
+ * @param object $spamFilter Spam filter instance
+ * @param object $logger Logger instance
+ * @return void
+ * @throws RuntimeException
+ */
+function processEmailFromPostfix($postfix, $spamFilter, $logger): void
+{
+    $logger->info("Processing email received from Postfix...");
+
+    // Read email data from stdin
+    $emailData = file_get_contents('php://stdin');
+    if (!$emailData) {
+        throw new RuntimeException("No email data received from Postfix.");
+    }
+    $logger->info("Raw email data successfully read.");
+
+    // Parse headers and body
+    list($headers, $body) = parseEmail($emailData);
+    $logger->info("Parsed headers: " . json_encode($headers));
+
+    // Detect spam using SpamFilter
+    $isSpam = $spamFilter->isSpam($headers, $body);
+    if ($isSpam) {
+        $logger->warning("Email flagged as spam. Processing terminated.");
+        exit(0); // Gracefully end processing
+    }
+
+    $logger->info("Email is clean of spam. Proceeding with requeue.");
+
+    // Extract recipient from headers
+    $recipient = $headers['To'] ?? '';
+    if (empty($recipient)) {
+        throw new RuntimeException("Recipient not found in email headers.");
+    }
+    $logger->info("Recipient resolved: {$recipient}");
+
+    // Requeue email back to Postfix
+    requeueEmail($emailData, $recipient, $logger);
+}
+
+/**
+ * Parse email into headers and body.
+ *
+ * @param string $emailData Raw email data
+ * @return array An array with headers and body
+ */
+function parseEmail(string $emailData): array
+{
+    list($headersRaw, $body) = preg_split("/\R\R/", $emailData, 2);
+
+    $headers = [];
+    $lines = explode("\n", $headersRaw);
+    foreach ($lines as $line) {
+        if (preg_match("/^([\w-]+):\s*(.*)$/", $line, $matches)) {
+            $headers[trim($matches[1])] = trim($matches[2]);
+        }
+    }
+    return [$headers, $body];
+}
+
+/**
+ * Requeue the email back to Postfix.
+ *
+ * @param string $emailData Full email data (headers + body)
+ * @param string $recipient Recipient email address
+ * @param object $logger Logger instance
+ * @return void
+ * @throws RuntimeException
+ */
+function requeueEmail(string $emailData, string $recipient, $logger): void
+{
+    $sendmailPath = '/usr/sbin/sendmail'; // Adjust path if necessary
+    $requeueCommand = "{$sendmailPath} -i -- {$recipient}";
+
+    $logger->info("Requeuing email to Postfix using command: {$requeueCommand}");
+
+    $process = proc_open($requeueCommand, [
+        ['pipe', 'r'], // stdin
+        ['pipe', 'w'], // stdout
+        ['pipe', 'w'], // stderr
+    ], $pipes);
+
+    if (is_resource($process)) {
+        // Write email data to stdin
+        fwrite($pipes[0], $emailData);
+        fclose($pipes[0]);
+
+        // Capture stdout and stderr
+        $output = stream_get_contents($pipes[1]);
+        $errors = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        // Close process and check exit code
+        $returnCode = proc_close($process);
+        if ($returnCode !== 0) {
+            $logger->error("Failed to requeue email: {$errors}");
+            throw new RuntimeException("Requeue failed. Exit code: {$returnCode}");
+        }
+
+        $logger->info("Email successfully requeued to Postfix.");
+    } else {
+        throw new RuntimeException("Could not open process to requeue email.");
+    }
+}
+
+/**
+ * Process IP input from Fail2Ban.
+ *
+ * @param object $cliArgs Command-line arguments utility
+ * @param object $logger Logger instance
+ * @return void
+ * @throws RuntimeException
+ */
+function processFail2BanInput($cliArgs, $logger): void
+{
+    $logger->info("Processing input from Fail2Ban...");
+
+    $ips = $cliArgs->get('ips', '');
+    if (!$ips) {
+        throw new RuntimeException("No IPs provided for Fail2Ban.");
+    }
+
+    $ipsArray = explode(',', $ips);
+    foreach ($ipsArray as $ip) {
+        $logger->info("Processing IP: {$ip}");
+        // Add logic here to handle Fail2Ban actions (e.g., ban or unban IPs)
+    }
+
+    $logger->info("Fail2Ban input processing complete.");
 }

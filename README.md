@@ -199,5 +199,16 @@ For support, please contact [support@cyfordtechnologies.com](mailto:support@cyfo
 
 
 
+####
+
+I had to add rule to polkit  for rocky os 9
+[root@CT-MAIL-00 security]#    sudo nano /etc/polkit-1/rules.d/50-report-ip.rules
+polkit.addRule(function(action, subject) {
+if (action.id === "org.freedesktop.systemd1.manage-units" &&
+subject.user === "report-ip") {
+return polkit.Result.YES;
+}
+});
+[root@CT-MAIL-00 security]#    sudo systemctl restart polkit
 
 
