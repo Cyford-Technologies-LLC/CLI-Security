@@ -78,16 +78,16 @@ if ($postfix) {
     $logger->info('Postfix is installed. Checking configuration...');
 
     if ($postfix->checkConfig()) {
-        $logger->info('Postfix configuration verified. Initializing SpamFilter...');
-        $spamFilter = initializeService('SpamFilter', static fn() => new SpamFilter($config), $logger);
-
-        if ($spamFilter) {
-            $logger->info('SpamFilter initialized successfully and integrated.');
-        } else {
-            $logger->warning('SpamFilter failed to initialize.');
-        }
+        $logger->info('Postfix configuration verified.');
     } else {
-        $logger->warning('Postfix configuration is incomplete. SpamFilter will not be initialized.');
+        $logger->warning('Postfix configuration is incomplete, attempting to fix...');
+        $postfix->autoConfig(); // Automatically configure missing settings.
+
+        if ($postfix->checkConfig()) {
+            $logger->info('Postfix has been successfully configured.');
+        } else {
+            throw new RuntimeException('Postfix configuration failed. Please check logs for details.');
+        }
     }
 }
 

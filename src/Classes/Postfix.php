@@ -1,6 +1,8 @@
 <?php
 namespace Cyford\Security\Classes;
 
+use RuntimeException;
+
 class Postfix
 {
     private string $mainConfigPath;
@@ -64,36 +66,47 @@ class Postfix
      */
     public function autoConfig(): void
     {
-        if (!$this->allowFileModification) {
-            echo "Automatic configuration is disabled. Please enable 'allow_modification' in your configuration to apply changes.\n";
-            return;
+        echo "INFO: Checking and configuring Postfix...\n";
+
+        // Check main.cf
+        if (file_exists($this->mainConfigPath)) {
+            $mainConfigContent = file_get_contents($this->mainConfigPath);
+            echo "INFO: Scanning '{$this->mainConfigPath}'...\n";
+            if (strpos($mainConfigContent, 'content_filter = security-filter:dummy') === false) {
+                echo "INFO: 'content_filter' is missing in {$this->mainConfigPath}, attempting to add it...\n";
+                $this->backupFile($this->mainConfigPath); // Ensure backup is triggered
+                file_put_contents($this->mainConfigPath, "\ncontent_filter = security-filter:dummy\n", FILE_APPEND);
+                echo "SUCCESS: 'content_filter' added to {$this->mainConfigPath}.\n";
+            } else {
+                echo "INFO: 'content_filter' already exists in {$this->mainConfigPath}.\n";
+            }
+        } else {
+            echo "ERROR: {$this->mainConfigPath} does not exist.\n";
         }
 
-        echo "Applying missing configurations...\n";
-
-        // Backup and update main.cf
-        if (!strpos(file_get_contents($this->mainConfigPath), 'content_filter = security-filter:dummy')) {
-            $this->backupFile($this->mainConfigPath);
-            file_put_contents($this->mainConfigPath, "\ncontent_filter = security-filter:dummy\n", FILE_APPEND);
-            echo " - Added 'content_filter' to {$this->mainConfigPath}.\n";
+        // Check master.cf
+        if (file_exists($this->masterConfigPath)) {
+            $masterConfigContent = file_get_contents($this->masterConfigPath);
+            echo "INFO: Scanning '{$this->masterConfigPath}'...\n";
+            if (strpos($masterConfigContent, 'security-filter unix - n n - - pipe') === false) {
+                echo "INFO: 'security-filter' is missing in {$this->masterConfigPath}, attempting to add it...\n";
+                $this->backupFile($this->masterConfigPath); // Ensure backup is triggered
+                file_put_contents(
+                    $this->masterConfigPath,
+                    "\nsecurity-filter unix - n n - - pipe\n  flags=Rq user=report-ip argv=/usr/local/bin/cyford-report --ips=\${client_address} --categories=3\n",
+                    FILE_APPEND
+                );
+                echo "SUCCESS: 'security-filter' added to {$this->masterConfigPath}.\n";
+            } else {
+                echo "INFO: 'security-filter' already exists in {$this->masterConfigPath}.\n";
+            }
+        } else {
+            echo "ERROR: {$this->masterConfigPath} does not exist.\n";
         }
 
-        // Backup and update master.cf
-        if (!strpos(file_get_contents($this->masterConfigPath), 'security-filter unix - n n - - pipe')) {
-            $this->backupFile($this->masterConfigPath);
-            file_put_contents(
-                $this->masterConfigPath,
-                "\nsecurity-filter unix - n n - - pipe\n  flags=Rq user=report-ip argv=/usr/local/bin/cyford-report --ips=\${client_address} --categories=3\n",
-                FILE_APPEND
-            );
-            echo " - Added 'security-filter' to {$this->masterConfigPath}.\n";
-        }
-
-        // Reload Postfix to apply the changes
+        // Reload Postfix
         $this->reload();
-        echo "Postfix has been reconfigured and reloaded.\n";
     }
-
     /**
      * Create a timestamped backup of a file before modifying it.
      *
@@ -102,21 +115,24 @@ class Postfix
      */
     private function backupFile(string $filePath): void
     {
-        if (!file_exists($filePath)) {
-            throw new RuntimeException("File not found for backup: {$filePath}");
+        $timestamp = date('Ymd_His');
+        $backupDir = $this->backupDirectory;
+        $backupFile = "{$backupDir}/" . basename($filePath) . ".backup_{$timestamp}";
+
+        // Ensure backup directory exists
+        if (!is_dir($backupDir)) {
+            if (!mkdir($backupDir, 0755, true) && !is_dir($backupDir)) {
+                throw new RuntimeException("Failed to create backup directory: {$backupDir}");
+            }
         }
 
-        $timestamp = date('Ymd_His');
-        $fileName = basename($filePath);
-        $backupPath = "{$this->backupDirectory}/{$fileName}.backup_{$timestamp}";
-
-        if (!copy($filePath, $backupPath)) {
+        // Create the backup
+        if (!copy($filePath, $backupFile)) {
             throw new RuntimeException("Failed to create backup for: {$filePath}");
         }
 
-        echo " - Backup created: {$backupPath}\n";
+        echo "Backup created: {$backupFile}\n";
     }
-
     /**
      * Reload Postfix service.
      *
@@ -124,16 +140,16 @@ class Postfix
      */
     public function reload(): void
     {
-        $command = "{$this->postfixCommand} reload";
-        $output = shell_exec($command);
+        echo "Reloading Postfix configuration...\n";
 
-        if (!$output) {
-            throw new RuntimeException('Failed to reload Postfix. Check your system configuration or logs.');
+        $output = shell_exec("sudo {$this->postfixCommand} reload 2>&1");
+
+        if (empty($output)) {
+            throw new RuntimeException("Failed to reload Postfix. Ensure the Postfix service is running.");
         }
 
-        echo "Postfix reloaded successfully.\n";
+        echo "Postfix reload output: {$output}\n";
     }
-
     /**
      * Get Postfix service status.
      *
