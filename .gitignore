@@ -2,7 +2,7 @@ config.php
 *.log
 logs/
 *.env
-
+test/
 
 
 

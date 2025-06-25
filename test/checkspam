@@ -1,0 +1,30 @@
+
+// Example usage:
+
+// Example configuration
+$config = [
+    'errors' => [
+        'error_log_location' => __DIR__ . '/logs/spam.log',
+    ],
+];
+
+// Create spam filter
+$spamFilter = new SpamFilter($config);
+
+// Example email details
+$emailHeaders = [
+    'From' => 'info@example.com',
+    'Subject' => 'Hello',
+    'Received' => 'from suspiciousserver.net',
+];
+
+$emailBody = <<<EOD
+no inquiryso resolve as... was estimating surrounded solicitude. Check out our offer here: http://ebikrat.run/19/58098971
+EOD;
+
+// Run spam analysis
+if ($spamFilter->isSpam($emailHeaders, $emailBody)) {
+    echo "This email is spam.";
+} else {
+    echo "This email is not spam.";
+}

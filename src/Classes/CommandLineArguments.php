@@ -3,6 +3,7 @@
 class CommandLineArguments
 {
     private array $arguments;
+    private string $inputType; // New property to store input type
 
     public function __construct(array $argv)
     {
@@ -13,6 +14,9 @@ class CommandLineArguments
 
         // Parse arguments, excluding the script name ($argv[0])
         $this->arguments = $this->parseArguments(array_slice($argv, 1));
+
+        // Automatically determine and validate the input_type
+        $this->inputType = $this->determineInputType();
     }
 
     /**
@@ -39,6 +43,29 @@ class CommandLineArguments
     }
 
     /**
+     * Automatically determine the input_type and validate it.
+     *
+     * @return string The valid input type (e.g., 'postfix', 'fail2ban', 'manual')
+     * @throws RuntimeException if the input_type is invalid or not provided
+     */
+    private function determineInputType(): string
+    {
+        $inputType = $this->arguments['input_type'] ?? null;
+
+        if (!$inputType) {
+            throw new RuntimeException("Missing required argument: --input_type");
+        }
+
+        // Validate the input type
+        $validInputTypes = ['postfix', 'fail2ban', 'manual'];
+        if (!in_array($inputType, $validInputTypes, true)) {
+            throw new RuntimeException("Invalid input_type provided: {$inputType}. Valid options are: " . implode(', ', $validInputTypes));
+        }
+
+        return $inputType;
+    }
+
+    /**
      * Get all parsed arguments.
      *
      * @return array
@@ -58,6 +85,16 @@ class CommandLineArguments
     public function get(string $key, mixed $default = null): mixed
     {
         return $this->arguments[$key] ?? $default;
+    }
+
+    /**
+     * Get a specific input type (postfix, fail2ban, manual).
+     *
+     * @return string
+     */
+    public function getInputType(): string
+    {
+        return $this->inputType;
     }
 
     /**
