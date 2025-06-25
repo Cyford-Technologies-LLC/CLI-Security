@@ -76,6 +76,7 @@ function processEmailFromPostfix($postfix, $spamFilter, $logger): void
 
     // Extract recipient from headers
     $recipient = $headers['To'] ?? '';
+    $logger->info("Recipient checked: {$recipient}");
     if (empty($recipient)) {
         throw new RuntimeException("Recipient not found in email headers.");
     }
