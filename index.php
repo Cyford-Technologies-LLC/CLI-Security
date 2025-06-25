@@ -116,41 +116,61 @@ function parseEmail(string $emailData): array
  */
 function requeueEmail(string $emailData, string $recipient, $logger): void
 {
-    $sendmailPath = '/usr/sbin/sendmail'; // Adjust path if necessary
-    $requeueCommand = "{$sendmailPath} -i -- {$recipient}";
+    $sendmailPath = '/usr/sbin/sendmail';
 
+    // Ensure the recipient is valid
+    if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+        $logger->error("Invalid recipient email: {$recipient}");
+        throw new InvalidArgumentException("Invalid recipient email: {$recipient}");
+    }
+
+    // Validate email data structure
+    if (!preg_match('/^From: .+/m', $emailData) || !preg_match('/^To: .+/m', $emailData) || !preg_match('/^Subject: .+/m', $emailData)) {
+        $logger->error("Email data is missing required headers (From, To, Subject).");
+        throw new InvalidArgumentException("Email data is missing required headers (From, To, Subject).");
+    }
+
+    $requeueCommand = "{$sendmailPath} -i -- {$recipient}";
     $logger->info("Requeuing email to Postfix using command: {$requeueCommand}");
 
+    // Open the process via proc_open
     $process = proc_open($requeueCommand, [
         ['pipe', 'r'], // stdin
         ['pipe', 'w'], // stdout
         ['pipe', 'w'], // stderr
     ], $pipes);
 
+    // If resource opens successfully
     if (is_resource($process)) {
-        // Write email data to stdin
-        fwrite($pipes[0], $emailData);
-        fclose($pipes[0]);
+        try {
+            // Write email data to stdin
+            fwrite($pipes[0], $emailData);
+            fclose($pipes[0]);
 
-        // Capture stdout and stderr
-        $output = stream_get_contents($pipes[1]);
-        $errors = stream_get_contents($pipes[2]);
-        fclose($pipes[1]);
-        fclose($pipes[2]);
+            // Capture stdout and stderr
+            $output = stream_get_contents($pipes[1]);
+            $errors = stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
 
-        // Close process and check exit code
-        $returnCode = proc_close($process);
-        if ($returnCode !== 0) {
-            $logger->error("Failed to requeue email: {$errors}");
-            throw new RuntimeException("Requeue failed. Exit code: {$returnCode}");
+            // Close process and get the exit code
+            $returnCode = proc_close($process);
+
+            if ($returnCode !== 0) {
+                $logger->error("Failed to requeue email. Exit code: {$returnCode}. Stderr: {$errors}. Stdout: {$output}");
+                throw new RuntimeException("Requeue failed. Exit code: {$returnCode}");
+            }
+
+            $logger->info("Email successfully requeued to Postfix. Output: {$output}");
+        } catch (Throwable $e) {
+            $logger->error("An exception occurred during email requeue: " . $e->getMessage());
+            throw $e; // Re-throw the exception for upper layers to handle
         }
-
-        $logger->info("Email successfully requeued to Postfix.");
     } else {
+        $logger->error("Failed to open a process for requeueing email.");
         throw new RuntimeException("Could not open process to requeue email.");
     }
 }
-
 /**
  * Process IP input from Fail2Ban.
  *
