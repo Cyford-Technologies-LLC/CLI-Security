@@ -8,6 +8,14 @@ define('BASE_PATH', __DIR__);
 require_once BASE_PATH . '/vendor/autoload.php';
 $config = require BASE_PATH . '/config.php';
 use Cyford\Security\Classes\Logger;
+use Cyford\Security\Classes\CommandLineArguments;
+use Cyford\Security\Classes\ApiClient;
+use Cyford\Security\Classes\Postfix;
+use Cyford\Security\Classes\Fail2Ban;
+use Cyford\Security\Classes\Firewall;
+use Cyford\Security\Classes\SpamFilter ;
+use Cyford\Security\Classes\Systems;
+
 
 // Initialize Logger
 $logger = new Logger($config);
