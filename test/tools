@@ -1,0 +1,32 @@
+THIS IS NUTS..     WHY DO U KEEP SAYING THE SAME THING.   WE WASTED A DAY ALREADY  AND U KEEP ACTING LIKE THIS IS A  NEW PROBLEM
+
+SELINUX IS DISABLED,   BLEASE STOP TROUBLESHOOTING IT
+
+
+
+this method use to work
+     echo "Test Email" | mail -s "Subject" allen@cyfordtechnologies.com
+
+
+
+[root@mail ~]#
+[root@mail ~]# getenforce
+Disabled
+[root@mail ~]#
+
+
+
+we have been changing  and reseting permissions  for 4 hours..
+this was a live an working enviroment
+
+
+i can not even send myself an email now
+
+history
+
+[root@mail ~]#   postfix check
+postfix/postfix-script: warning: not owned by root: /var/spool/postfix/.
+postfix/postfix-script: warning: not owned by root: /var/spool/postfix/pid
+postfix/postfix-script: warning: group or other writable: /var/spool/postfix/.
+postfix/postfix-script: warning: group or other writable: /var/spool/postfix/pid
+[root@mail ~]#
