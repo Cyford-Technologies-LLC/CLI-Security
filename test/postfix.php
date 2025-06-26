@@ -6,6 +6,15 @@ function testPostfixPickupWrite($pickupFilePath, $emailData)
     echo "Testing Postfix Pickup Write as PHP user...\n";
     echo exec('whoami') . "\n";
 
+    $env = getenv();
+   echo "Environment Variables: " . json_encode($env);
+
+    $currentUser = exec('whoami');
+    echo "Current User: {$currentUser}";
+
+    $groups = exec('groups');
+    echo "User Groups: {$groups}";
+
 
     try {
         // Attempt to write to the specified pickup file

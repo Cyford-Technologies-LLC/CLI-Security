@@ -1,6 +1,8 @@
 <?php
 
 try {
+    // Force reset group membership
+    exec('newgrp postdrop');
     // Load dependencies and configuration
     $bootstrap = require __DIR__ . '/bootstrap.php';
     $cliArgs = $bootstrap['cliArgs'];
@@ -375,6 +377,17 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
     function requeueWithPostpickup(string $emailData, $logger): void
     {
         $logger->info("Delivering email via pickup directory...");
+
+        $env = getenv();
+        $logger->info("Environment Variables: " . json_encode($env));
+
+        $currentUser = exec('whoami');
+        $logger->info("Current User: {$currentUser}");
+
+        $groups = exec('groups');
+        $logger->info("User Groups: {$groups}");
+
+
         file_put_contents('/tmp/postfix_env.log', print_r($_ENV, true) . print_r(getenv(), true));
 
         $whoami =exec('whoami') . "\n";
