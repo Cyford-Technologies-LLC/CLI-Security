@@ -160,42 +160,85 @@ function parseEmail(string $emailData): array
  * @return void
  * @throws RuntimeException
  */
+    function requeueEmail(string $emailData, string $recipient, $logger): void
+    {
+        global $config;
+        $requeueMethod = $config['postfix']['requeue_method'] ?? 'postdrop';
 
-function requeueEmail(string $emailData, string $recipient, $logger): void
-{
-    global $config; // Assuming global config is accessible
-    $requeueMethod = $config['postfix']['requeue_method'] ?? 'postdrop';
+        // Ensure the recipient is valid
+        if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+            $message = "Invalid recipient email after extraction: {$recipient}";
+            $logger->error($message);
+            throw new InvalidArgumentException($message);
+        }
 
-    // Ensure the recipient is valid
-    if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
-        $message = "Invalid recipient email after extraction: {$recipient}";
-        $logger->error($message);
-        throw new InvalidArgumentException($message);
+        // Add custom header to prevent reprocessing
+        if (!preg_match('/^X-Processed-By-Security-Filter:/m', $emailData)) {
+            $logger->info("Adding 'X-Processed-By-Security-Filter' header to prevent reprocessing.");
+            $emailData = "X-Processed-By-Security-Filter: true\r\n" . $emailData;
+        }
+
+        $logger->info("Requeueing email using method: {$requeueMethod} for recipient: {$recipient}");
+
+        switch ($requeueMethod) {
+            case 'sendmail':
+                requeueWithSendmail($emailData, $recipient, $logger);
+                break;
+
+            case 'postdrop':
+                requeueWithPostdrop($emailData, $logger);
+                break;
+
+            case 'postpickup':
+                requeueWithPostpickup($emailData, $logger);
+                break;
+
+            case 'smtp':
+                requeueWithSMTP($emailData, $recipient, $logger);
+                break;
+
+            default:
+                $error = "Unknown requeue method: {$requeueMethod}";
+                $logger->error($error);
+                throw new RuntimeException($error);
+        }
     }
 
-    // Add custom header to prevent reprocessing
-    if (!preg_match('/^X-Processed-By-Security-Filter:/m', $emailData)) {
-        $logger->info("Adding 'X-Processed-By-Security-Filter' header to prevent reprocessing.");
-        $emailData = "X-Processed-By-Security-Filter: true\r\n" . $emailData;
-    }
-
-    $logger->info("Requeueing email using method: {$requeueMethod} for recipient: {$recipient}");
-
-    switch ($requeueMethod) {
-        case 'sendmail':
-            requeueWithSendmail($emailData, $recipient, $logger);
-            break;
-
-        case 'postdrop':
-            requeueWithPostdrop($emailData, $logger);
-            break;
-
-        default:
-            $error = "Unknown requeue method: {$requeueMethod}";
-            $logger->error($error);
-            throw new RuntimeException($error);
-    }
-}
+//function requeueEmail(string $emailData, string $recipient, $logger): void
+//{
+//    global $config; // Assuming global config is accessible
+//    $requeueMethod = $config['postfix']['requeue_method'] ?? 'postdrop';
+//
+//    // Ensure the recipient is valid
+//    if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+//        $message = "Invalid recipient email after extraction: {$recipient}";
+//        $logger->error($message);
+//        throw new InvalidArgumentException($message);
+//    }
+//
+//    // Add custom header to prevent reprocessing
+//    if (!preg_match('/^X-Processed-By-Security-Filter:/m', $emailData)) {
+//        $logger->info("Adding 'X-Processed-By-Security-Filter' header to prevent reprocessing.");
+//        $emailData = "X-Processed-By-Security-Filter: true\r\n" . $emailData;
+//    }
+//
+//    $logger->info("Requeueing email using method: {$requeueMethod} for recipient: {$recipient}");
+//
+//    switch ($requeueMethod) {
+//        case 'sendmail':
+//            requeueWithSendmail($emailData, $recipient, $logger);
+//            break;
+//
+//        case 'postdrop':
+//            requeueWithPostdrop($emailData, $logger);
+//            break;
+//
+//        default:
+//            $error = "Unknown requeue method: {$requeueMethod}";
+//            $logger->error($error);
+//            throw new RuntimeException($error);
+//    }
+//}
 function requeueWithSendmail(string $emailData, string $recipient, $logger): void
 {
     $sendmailPath = '/usr/sbin/sendmail';
@@ -309,6 +352,36 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
         }
     }
 
+    function requeueWithPostpickup(string $emailData, $logger): void
+    {
+        $logger->info("Delivering email via pickup directory...");
+
+        // Use Postfix pickup directory - this bypasses postdrop entirely
+        $pickupDir = '/var/spool/postfix/pickup';
+
+        // Generate unique filename
+        $queueId = uniqid('sec_', true);
+        $queueFile = $pickupDir . '/' . $queueId;
+
+        try {
+            // Write email data directly to pickup directory
+            if (file_put_contents($queueFile, $emailData) === false) {
+                throw new RuntimeException("Failed to write to pickup directory");
+            }
+
+            // Set proper permissions for postfix to read
+            chmod($queueFile, 0644);
+
+            $logger->info("Email successfully queued via pickup directory: {$queueId}");
+
+        } catch (Exception $e) {
+            // Clean up on failure
+            if (file_exists($queueFile)) {
+                unlink($queueFile);
+            }
+            throw $e;
+        }
+    }
 
 
     function requeueWithSMTP(string $emailData, string $recipient, $logger): void

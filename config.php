@@ -7,7 +7,7 @@ return [
         'report_endpoint' => 'https://api.cyfordtechnologies.com/api/security/v1/report-ip', // Report URL
     ],
     'postfix' => [
-        'requeue_method' => 'postdrop', // Options: sendmail, postdrop
+        'requeue_method' => 'postdrop', // Options: sendmail, postdrop , postpickup  , smtp
         'main_config' => '/etc/postfix/main.cf', // Path to Postfix main configuration file
         'master_config' => '/etc/postfix/master.cf', // Path to Postfix master configuration file
         'postfix_command' => '/usr/sbin/postfix', // Path to Postfix executable
