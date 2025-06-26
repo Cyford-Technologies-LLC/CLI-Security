@@ -304,6 +304,7 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
         }
     }
 
+
     function requeueWithSMTP(string $emailData, string $recipient, $logger): void
     {
         $smtpHost = '127.0.0.1';
