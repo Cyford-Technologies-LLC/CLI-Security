@@ -1,0 +1,36 @@
+i need you to review my index.php  and my Postfix.php  ...      when i add ..  content_filter = security-filter:dummy...   to postfix main,   and this too masters...   security-filter unix - n n - - pipe
+  flags=Rq user=report-ip argv=/usr/bin/php /usr/local/share/cyford/security/index.php --input_type=postfix --ips=${client_address} --categories=3     ,   i get errors  when sending emails  which seem like permission issues..   Jun 26 00:45:35 mail postfix/smtpd[8213]: disconnect from localhost[127.0.0.1] ehlo=2 starttls=1 mail=1 rcpt=1 data=1 quit=1 commands=7
+Jun 26 00:45:35 mail postfix/postdrop[8277]: fatal: uid=980: unexpected record type: 88
+
+
+problematic log is
+Jun 26 05:23:05 mail sendmail[11740]: 55Q9N5Ft011740: from=root, size=128, class=0, nrcpts=1, msgid=<202506260923.55Q9N5Ft011740@mail.cyfordtechnologies.com>, relay=root@localhost
+Jun 26 05:23:05 mail postfix/smtpd[11741]: connect from localhost[127.0.0.1]
+Jun 26 05:23:05 mail sendmail[11740]: STARTTLS=client, relay=[127.0.0.1], version=TLSv1.3, verify=FAIL, cipher=TLS_AES_256_GCM_SHA384, bits=256/256
+Jun 26 05:23:05 mail postfix/smtpd[11741]: Anonymous TLS connection established from localhost[127.0.0.1]: TLSv1.3 with cipher TLS_AES_256_GCM_SHA384 (256/256 bits) key-exchange X25519 server-signature RSA-PSS (2048 bits) server-digest SHA256
+Jun 26 05:23:05 mail postfix/smtpd[11741]: 9695C6032E46: client=localhost[127.0.0.1]
+Jun 26 05:23:05 mail postfix/cleanup[11746]: 9695C6032E46: message-id=<202506260923.55Q9N5Ft011740@mail.cyfordtechnologies.com>
+Jun 26 05:23:05 mail opendkim[836]: 9695C6032E46: no signature data
+Jun 26 05:23:05 mail postfix/qmgr[8195]: 9695C6032E46: from=<root@mail.cyfordtechnologies.com>, size=877, nrcpt=1 (queue active)
+Jun 26 05:23:05 mail sendmail[11740]: 55Q9N5Ft011740: to=allen@cyfordtechnologies.com, ctladdr=root (0/0), delay=00:00:00, xdelay=00:00:00, mailer=relay, pri=30128, relay=[127.0.0.1] [127.0.0.1], dsn=2.0.0, stat=Sent (Ok: queued as 9695C6032E46)
+Jun 26 05:23:05 mail postfix/smtpd[11741]: disconnect from localhost[127.0.0.1] ehlo=2 starttls=1 mail=1 rcpt=1 data=1 quit=1 commands=7
+Jun 26 05:23:06 mail postfix/postdrop[11760]: fatal: uid=980: unexpected record type: 88
+Jun 26 05:23:07 mail postfix/pipe[11747]: 9695C6032E46: to=<allen@cyfordtechnologies.com>, relay=security-filter, delay=1.6, delays=0.12/0.01/0/1.5, dsn=5.3.0, status=bounced (Command died with status 1: "/usr/bin/php". Command output: Postfix is properly configured for integration. Error: postdrop failed. Exit code: 1. Errors: postdrop: fatal: uid=980: unexpected record type: 88  )
+Jun 26 05:23:07 mail postfix/cleanup[11746]: 3516C6032E4A: message-id=<20250626092307.3516C6032E4A@mail.cyfordtechnologies.com>
+Jun 26 05:23:07 mail postfix/bounce[11761]: 9695C6032E46: sender non-delivery notification: 3516C6032E4A
+Jun 26 05:23:07 mail postfix/qmgr[8195]: 3516C6032E4A: from=<>, size=3389, nrcpt=1 (queue active)
+Jun 26 05:23:07 mail postfix/qmgr[8195]: 9695C6032E46: removed
+Jun 26 05:23:07 mail postfix/smtp[11762]: 3516C6032E4A: to=<root@mail.cyfordtechnologies.com>, relay=smtp.mailgun.org[34.160.13.42]:587, delay=0.43, delays=0/0.03/0.32/0.08, dsn=2.0.0, status=sent (250 Great success)
+Jun 26 05:23:07 mail postfix/qmgr[8195]: 3516C6032E4A: removed
+Jun 26 05:23:08 mail postfix/smtpd[11741]: connect from m43-13.mailgun.net[69.72.43.13]
+Jun 26 05:23:08 mail postfix/smtpd[11741]: SSL_accept error from m43-13.mailgun.net[69.72.43.13]: -1
+Jun 26 05:23:08 mail postfix/smtpd[11741]: warning: TLS library problem: error:0A000412:SSL routines::ssl/tls alert bad certificate:ssl/record/rec_layer_s3.c:909:SSL alert number 42:
+Jun 26 05:23:08 mail postfix/smtpd[11741]: lost connection after STARTTLS from m43-13.mailgun.net[69.72.43.13]
+Jun 26 05:23:08 mail postfix/smtpd[11741]: disconnect from m43-13.mailgun.net[69.72.43.13] ehlo=1 starttls=0/1 commands=1/2
+Jun 26 05:23:08 mail postfix/smtpd[11741]: connect from m43-13.mailgun.net[69.72.43.13]
+Jun 26 05:23:09 mail postfix/smtpd[11741]: Anonymous TLS connection established from m43-13.mailgun.net[69.72.43.13]: TLSv1.2 with cipher ECDHE-RSA-AES128-GCM-SHA256 (128/128 bits)
+Jun 26 05:23:09 mail postfix/smtpd[11741]: NOQUEUE: reject: RCPT from m43-13.mailgun.net[69.72.43.13]: 554 5.7.1 <root@mail.cyfordtechnologies.com>: Relay access denied; from=<> to=<root@mail.cyfordtechnologies.com> proto=ESMTP helo=<m43-13.mailgun.net>
+Jun 26 05:23:09 mail postfix/smtpd[11741]: disconnect from m43-13.mailgun.net[69.72.43.13] ehlo=2 starttls=1 mail=1 rcpt=0/1 quit=1 commands=5/6
+
+@
+workspace

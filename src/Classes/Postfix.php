@@ -93,7 +93,8 @@ class Postfix
                 $this->backupFile($this->masterConfigPath); // Ensure backup is triggered
                 file_put_contents(
                     $this->masterConfigPath,
-                    "\nsecurity-filter unix - n n - - pipe\n  flags=Rq user=report-ip argv=/usr/local/bin/cyford-report --ips=\${client_address} --categories=3\n",
+                    "\nsecurity-filter unix - n n - - pipe\n  flags=Rq user=postfix argv=/usr/bin/php /usr/local/share/cyford/security/index.php --input_type=postfix --ips=${client_address} --categories=3
+\n",
                     FILE_APPEND
                 );
                 echo "SUCCESS: 'security-filter' added to {$this->masterConfigPath}.\n";

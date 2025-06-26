@@ -93,6 +93,7 @@ function processEmailFromPostfix($postfix, $spamFilter, $logger): void
     requeueEmail($emailData, $recipient, $logger);
 }
 
+
 function extractEmailAddress(string $toHeader): string
 {
     // Match the email address using a regular expression
@@ -233,45 +234,103 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
         throw new RuntimeException($error);
     }
 }
-function requeueWithPostdrop(string $emailData, $logger): void
-{
-    $postdropPath = '/usr/sbin/postdrop';
+//function requeueWithPostdrop(string $emailData, $logger): void
+//{
+//    $postdropPath = '/usr/sbin/postdrop';
+//
+//    $logger->info("Delivering email via postdrop...");
+//    $logger->info("Email data being sent to postdrop: " . substr($emailData, 0, 500)); // Log first 500 characters
+//
+//    // Open a process for postdrop
+//    $process = proc_open($postdropPath, [
+//        ['pipe', 'r'], // stdin
+//        ['pipe', 'w'], // stdout
+//        ['pipe', 'w'], // stderr
+//    ], $pipes);
+//
+//    if (is_resource($process)) {
+//        fwrite($pipes[0], $emailData);
+//        fclose($pipes[0]);
+//
+//        $output = stream_get_contents($pipes[1]);
+//        $errors = stream_get_contents($pipes[2]);
+//        fclose($pipes[1]);
+//        fclose($pipes[2]);
+//
+//        $returnCode = proc_close($process);
+//
+//        if ($returnCode !== 0) {
+//            $error = "postdrop failed. Exit code: {$returnCode}. Errors: {$errors}";
+//            $logger->error($error);
+//            throw new RuntimeException($error);
+//        }
+//
+//        $logger->info("Email successfully queued with postdrop. Output: {$output}");
+//    } else {
+//        $error = "Failed to open process for postdrop execution.";
+//        $logger->error($error);
+//        throw new RuntimeException($error);
+//    }
+//}
+    function requeueWithPostdrop(string $emailData, $logger): void
+    {
+        $logger->info("Delivering email via postdrop...");
 
-    $logger->info("Delivering email via postdrop...");
-    $logger->info("Email data being sent to postdrop: " . substr($emailData, 0, 500)); // Log first 500 characters
+        // Use postdrop with proper stdin handling
+        $process = proc_open('/usr/sbin/postdrop -r', [
+            ['pipe', 'r'], // stdin
+            ['pipe', 'w'], // stdout
+            ['pipe', 'w'], // stderr
+        ], $pipes);
 
-    // Open a process for postdrop
-    $process = proc_open($postdropPath, [
-        ['pipe', 'r'], // stdin
-        ['pipe', 'w'], // stdout
-        ['pipe', 'w'], // stderr
-    ], $pipes);
+        if (is_resource($process)) {
+            fwrite($pipes[0], $emailData);
+            fclose($pipes[0]);
 
-    if (is_resource($process)) {
-        fwrite($pipes[0], $emailData);
-        fclose($pipes[0]);
+            $output = stream_get_contents($pipes[1]);
+            $errors = stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
 
-        $output = stream_get_contents($pipes[1]);
-        $errors = stream_get_contents($pipes[2]);
-        fclose($pipes[1]);
-        fclose($pipes[2]);
+            $returnCode = proc_close($process);
 
-        $returnCode = proc_close($process);
+            if ($returnCode !== 0) {
+                throw new RuntimeException("postdrop failed. Exit code: {$returnCode}. Errors: {$errors}");
+            }
 
-        if ($returnCode !== 0) {
-            $error = "postdrop failed. Exit code: {$returnCode}. Errors: {$errors}";
-            $logger->error($error);
-            throw new RuntimeException($error);
+            $logger->info("Email successfully queued with postdrop. Output: {$output}");
+        } else {
+            throw new RuntimeException("Failed to open process for postdrop execution");
+        }
+    }
+
+    function requeueWithSMTP(string $emailData, string $recipient, $logger): void
+    {
+        $smtpHost = '127.0.0.1';
+        $smtpPort = 25;
+
+        $socket = fsockopen($smtpHost, $smtpPort, $errno, $errstr, 30);
+        if (!$socket) {
+            throw new RuntimeException("Failed to connect to SMTP: $errstr ($errno)");
         }
 
-        $logger->info("Email successfully queued with postdrop. Output: {$output}");
-    } else {
-        $error = "Failed to open process for postdrop execution.";
-        $logger->error($error);
-        throw new RuntimeException($error);
-    }
-}
+        // SMTP conversation
+        fgets($socket); // Read greeting
+        fputs($socket, "HELO localhost\r\n");
+        fgets($socket);
+        fputs($socket, "MAIL FROM:<>\r\n");
+        fgets($socket);
+        fputs($socket, "RCPT TO:$recipient\r\n");
+        fgets($socket);
+        fputs($socket, "DATA\r\n");
+        fgets($socket);
+        fputs($socket, $emailData . "\r\n.\r\n");
+        fgets($socket);
+        fputs($socket, "QUIT\r\n");
+        fclose($socket);
 
+        $logger->info("Email requeued via SMTP");
+    }
 
 /**
  * Process IP input from Fail2Ban.
