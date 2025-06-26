@@ -274,33 +274,45 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
 //}
     function requeueWithPostdrop(string $emailData, $logger): void
     {
-        $logger->info("Delivering email via postdrop...");
+        $logger->info("Delivering email via postsuper...");
 
-        // Use postdrop with -r flag for raw message format
-        $process = proc_open('/usr/sbin/postdrop -r', [
-            ['pipe', 'r'], // stdin
-            ['pipe', 'w'], // stdout
-            ['pipe', 'w'], // stderr
-        ], $pipes);
+        // Create temporary file in postfix spool
+        $spoolDir = '/var/spool/postfix/incoming';
+        if (!is_dir($spoolDir)) {
+            $spoolDir = '/var/spool/postfix/maildrop';
+        }
 
-        if (is_resource($process)) {
-            fwrite($pipes[0], $emailData);
-            fclose($pipes[0]);
+        $tempFile = tempnam($spoolDir, 'requeue_');
+        if (!$tempFile) {
+            throw new RuntimeException("Failed to create temporary file in spool directory");
+        }
 
-            $output = stream_get_contents($pipes[1]);
-            $errors = stream_get_contents($pipes[2]);
-            fclose($pipes[1]);
-            fclose($pipes[2]);
-
-            $returnCode = proc_close($process);
-
-            if ($returnCode !== 0) {
-                throw new RuntimeException("postdrop failed. Exit code: {$returnCode}. Errors: {$errors}");
+        try {
+            // Write email data to temporary file
+            if (file_put_contents($tempFile, $emailData) === false) {
+                throw new RuntimeException("Failed to write email data to temporary file");
             }
 
-            $logger->info("Email successfully queued with postdrop. Output: {$output}");
-        } else {
-            throw new RuntimeException("Failed to open process for postdrop execution");
+            // Set proper ownership and permissions
+            chown($tempFile, 'postfix');
+            chgrp($tempFile, 'postfix');
+            chmod($tempFile, 0600);
+
+            // Use postsuper to requeue
+            $command = "/usr/sbin/postsuper -r " . basename($tempFile);
+            $output = shell_exec($command . ' 2>&1');
+
+            if (strpos($output, 'requeued') === false) {
+                throw new RuntimeException("postsuper failed. Output: {$output}");
+            }
+
+            $logger->info("Email successfully requeued with postsuper. Output: {$output}");
+
+        } finally {
+            // Clean up if file still exists
+            if (file_exists($tempFile)) {
+                unlink($tempFile);
+            }
         }
     }
 
