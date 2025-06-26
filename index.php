@@ -386,24 +386,32 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
             if (file_put_contents($tempFile, $emailData) === false) {
                 throw new RuntimeException("Failed to write temporary file");
             }
+            $logger->info("Temp file created: {$tempFile}");
 
-            // Copy file using sudo
-            $copyResult = shell_exec("sudo cp {$tempFile} {$pickupDir}/ 2>&1");
+            // Copy file using sudo with full path
+            $copyCmd = "sudo /bin/cp {$tempFile} {$pickupDir}/";
+            $logger->info("Executing: {$copyCmd}");
+            $copyResult = shell_exec($copyCmd . ' 2>&1');
+            $logger->info("Copy result: " . ($copyResult ?: 'No output'));
 
             // Check if copy worked
             if (!file_exists($finalFile)) {
-                throw new RuntimeException("Copy failed: " . ($copyResult ?: 'No output'));
+                // Try alternative approach - direct write with sudo
+                $directCmd = "sudo tee {$finalFile} < {$tempFile} > /dev/null";
+                $logger->info("Trying direct write: {$directCmd}");
+                shell_exec($directCmd . ' 2>&1');
+            }
+
+            if (!file_exists($finalFile)) {
+                throw new RuntimeException("Both copy methods failed");
             }
 
             // Set ownership and permissions
-            shell_exec("sudo chown postfix:postfix {$finalFile} 2>&1");
-            shell_exec("sudo chmod 644 {$finalFile} 2>&1");
+            shell_exec("sudo /bin/chown postfix:postfix {$finalFile} 2>&1");
+            shell_exec("sudo /bin/chmod 644 {$finalFile} 2>&1");
 
             $logger->info("Email successfully queued via pickup directory: {$queueId}");
 
-        } catch (Exception $e) {
-            $logger->error("Postpickup failed: " . $e->getMessage());
-            throw $e;
         } finally {
             // Clean up temp file
             if (file_exists($tempFile)) {
