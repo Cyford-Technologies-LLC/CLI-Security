@@ -276,7 +276,7 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
     {
         $logger->info("Delivering email via postdrop...");
 
-        // Use postdrop with proper stdin handling
+        // Use postdrop with -r flag for raw message format
         $process = proc_open('/usr/sbin/postdrop -r', [
             ['pipe', 'r'], // stdin
             ['pipe', 'w'], // stdout
