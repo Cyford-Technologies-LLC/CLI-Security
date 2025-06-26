@@ -359,7 +359,6 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
         $pickupDir = '/var/spool/postfix/pickup';
         $queueId = uniqid('sec_', true);
         $tempFile = "/tmp/{$queueId}";
-        $queueFile = "{$pickupDir}/{$queueId}";
 
         try {
             // Write to temp file first
@@ -367,22 +366,23 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
                 throw new RuntimeException("Failed to write temporary file");
             }
 
-            // Use sudo to move file to pickup directory
-            $command = "sudo mv {$tempFile} {$queueFile} && sudo chown postfix:postfix {$queueFile} && sudo chmod 644 {$queueFile}";
-            $output = shell_exec($command . ' 2>&1');
+            // Use specific sudo commands that are allowed without password
+            $copyResult = shell_exec("sudo cp {$tempFile} {$pickupDir}/ 2>&1");
+            $chownResult = shell_exec("sudo chown postfix:postfix {$pickupDir}/{$queueId} 2>&1");
+            $chmodResult = shell_exec("sudo chmod 644 {$pickupDir}/{$queueId} 2>&1");
 
-            if (!file_exists($queueFile)) {
-                throw new RuntimeException("Failed to move file to pickup directory. Output: {$output}");
+            // Check if file was created successfully
+            if (!file_exists("{$pickupDir}/{$queueId}")) {
+                throw new RuntimeException("Failed to create file in pickup directory");
             }
 
             $logger->info("Email successfully queued via pickup directory: {$queueId}");
 
-        } catch (Exception $e) {
-            // Clean up temp file if it exists
+        } finally {
+            // Clean up temp file
             if (file_exists($tempFile)) {
                 unlink($tempFile);
             }
-            throw $e;
         }
     }
 
