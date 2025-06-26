@@ -44,7 +44,7 @@ class Postfix
         $masterConfigCheck = strpos($masterConfig, 'security-filter unix - n n - - pipe') !== false;
 
         if ($mainConfigCheck && $masterConfigCheck) {
-            echo "Postfix is properly configured for integration.\n";
+            echo "Cyford WEB ARMOR (for PostFix) INITIATED!.\n";
             return true;
         }
 
