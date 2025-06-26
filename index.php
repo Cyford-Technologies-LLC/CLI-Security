@@ -162,7 +162,8 @@ function parseEmail(string $emailData): array
 
 function requeueEmail(string $emailData, string $recipient, $logger): void
 {
-    $sendmailPath = '/usr/sbin/sendmail';
+    global $config; // Assuming global config is accessible
+    $requeueMethod = $config['postfix']['requeue_method'] ?? 'postdrop';
 
     // Ensure the recipient is valid
     if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
@@ -177,10 +178,31 @@ function requeueEmail(string $emailData, string $recipient, $logger): void
         $emailData = "X-Processed-By-Security-Filter: true\r\n" . $emailData;
     }
 
-    $requeueCommand = "{$sendmailPath} -i -- {$recipient}";
-    $logger->info("Requeuing email to Postfix using command: {$requeueCommand}");
+    $logger->info("Requeueing email using method: {$requeueMethod} for recipient: {$recipient}");
 
-    // Execute the requeue process
+    switch ($requeueMethod) {
+        case 'sendmail':
+            requeueWithSendmail($emailData, $recipient, $logger);
+            break;
+
+        case 'postdrop':
+            requeueWithPostdrop($emailData, $logger);
+            break;
+
+        default:
+            $error = "Unknown requeue method: {$requeueMethod}";
+            $logger->error($error);
+            throw new RuntimeException($error);
+    }
+}
+function requeueWithSendmail(string $emailData, string $recipient, $logger): void
+{
+    $sendmailPath = '/usr/sbin/sendmail';
+
+    $requeueCommand = "{$sendmailPath} -i -- {$recipient}";
+    $logger->info("Executing sendmail command: {$requeueCommand}");
+
+    // Open a process for sendmail
     $process = proc_open($requeueCommand, [
         ['pipe', 'r'], // stdin
         ['pipe', 'w'], // stdout
@@ -197,18 +219,59 @@ function requeueEmail(string $emailData, string $recipient, $logger): void
         fclose($pipes[2]);
 
         $returnCode = proc_close($process);
+
         if ($returnCode !== 0) {
-            $error = "Failed to requeue email. Exit code: {$returnCode}. Stderr: {$errors}.";
+            $error = "sendmail failed. Exit code: {$returnCode}. Errors: {$errors}";
             $logger->error($error);
             throw new RuntimeException($error);
         }
 
-        $logger->info("Email successfully requeued. Output: {$output}");
+        $logger->info("Email successfully queued with sendmail. Output: {$output}");
     } else {
-        $logger->error("Failed to open process for requeueing email.");
-        throw new RuntimeException("Could not open process to requeue email.");
+        $error = "Failed to open process for sendmail execution.";
+        $logger->error($error);
+        throw new RuntimeException($error);
     }
 }
+function requeueWithPostdrop(string $emailData, $logger): void
+{
+    $postdropPath = '/usr/sbin/postdrop';
+
+    $logger->info("Delivering email via postdrop...");
+
+    // Open a process for postdrop
+    $process = proc_open($postdropPath, [
+        ['pipe', 'r'], // stdin
+        ['pipe', 'w'], // stdout
+        ['pipe', 'w'], // stderr
+    ], $pipes);
+
+    if (is_resource($process)) {
+        fwrite($pipes[0], $emailData);
+        fclose($pipes[0]);
+
+        $output = stream_get_contents($pipes[1]);
+        $errors = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        $returnCode = proc_close($process);
+
+        if ($returnCode !== 0) {
+            $error = "postdrop failed. Exit code: {$returnCode}. Errors: {$errors}";
+            $logger->error($error);
+            throw new RuntimeException($error);
+        }
+
+        $logger->info("Email successfully queued with postdrop. Output: {$output}");
+    } else {
+        $error = "Failed to open process for postdrop execution.";
+        $logger->error($error);
+        throw new RuntimeException($error);
+    }
+}
+
+
 /**
  * Process IP input from Fail2Ban.
  *
