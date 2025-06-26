@@ -376,34 +376,35 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
     {
         $logger->info("Delivering email via pickup directory...");
 
-        $pickupDir = '/var/spool/postfix/pickup';
         $queueId = uniqid('sec_', true);
         $tempFile = "/tmp/{$queueId}";
-        $finalFile = "{$pickupDir}/{$queueId}";
+        $pickupFile = "/var/spool/postfix/pickup/{$queueId}";
 
         try {
-            // Write to temp file first
-            file_put_contents($tempFile, $emailData);
-
-            // Use the working sudo mv approach (like the successful files in the directory)
-            $result = shell_exec("sudo mv {$tempFile} {$finalFile} 2>&1");
-
-            if (!file_exists($finalFile)) {
-                throw new RuntimeException("Move failed: " . ($result ?: 'No output'));
+            // Write to temp file
+            if (file_put_contents($tempFile, $emailData) === false) {
+                throw new RuntimeException("Failed to write temp file");
             }
 
-            // Set proper ownership (like the working files)
-            shell_exec("sudo chown postfix:postfix {$finalFile} 2>&1");
-            shell_exec("sudo chmod 644 {$finalFile} 2>&1");
+            // Use the exact command that worked from command line
+            $command = "sudo mv {$tempFile} {$pickupFile}";
+            exec($command, $output, $returnCode);
+
+            if ($returnCode !== 0 || !file_exists($pickupFile)) {
+                throw new RuntimeException("Move command failed. Return code: {$returnCode}, Output: " . implode("\n", $output));
+            }
+
+            // Set ownership like the working files
+            exec("sudo chown postfix:postfix {$pickupFile}", $chownOutput, $chownCode);
+            exec("sudo chmod 644 {$pickupFile}", $chmodOutput, $chmodCode);
 
             $logger->info("Email successfully queued via pickup directory: {$queueId}");
 
-        } catch (Exception $e) {
-            // Clean up temp file if it exists
+        } finally {
+            // Clean up temp file if it still exists
             if (file_exists($tempFile)) {
                 unlink($tempFile);
             }
-            throw $e;
         }
     }
 
