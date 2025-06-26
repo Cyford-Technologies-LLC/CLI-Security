@@ -375,6 +375,8 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
     function requeueWithPostpickup(string $emailData, $logger): void
     {
         $logger->info("Delivering email via pickup directory...");
+        file_put_contents('/tmp/postfix_env.log', print_r($_ENV, true) . print_r(getenv(), true));
+
         $whoami =exec('whoami') . "\n";
         $logger->info("I AM $whoami");
 
@@ -385,6 +387,8 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
 
         // Try direct write first (should work with postdrop group membership)
         $result = file_put_contents($pickupFile, $emailData);
+
+
         $logger->info("Delivering email Result: {$result}");
 
 
