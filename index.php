@@ -376,43 +376,22 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
     {
         $logger->info("Delivering email via pickup directory...");
 
+        // Generate unique filename like the working files in your directory
         $queueId = uniqid('sec_', true);
-        $tempFile = "/tmp/{$queueId}";
         $pickupFile = "/var/spool/postfix/pickup/{$queueId}";
 
-        try {
-            // Write to temp file
-            $writeResult = file_put_contents($tempFile, $emailData);
-            if ($writeResult === false) {
-                throw new RuntimeException("Failed to write temp file");
-            }
+        // Write directly to pickup directory (this must work since you have files there)
+        $result = file_put_contents($pickupFile, $emailData);
 
-            // Verify temp file exists
-            if (!file_exists($tempFile)) {
-                throw new RuntimeException("Temp file was not created: {$tempFile}");
-            }
-
-            // Use the exact command that worked from command line
-            $command = "sudo mv {$tempFile} {$pickupFile}";
-            exec($command, $output, $returnCode);
-
-            // Check if the move actually worked
-            if (!file_exists($pickupFile)) {
-                throw new RuntimeException("File not found after move. Temp file exists: " . (file_exists($tempFile) ? 'yes' : 'no') . ", Return code: {$returnCode}");
-            }
-
-            // Set ownership like the working files
-            exec("sudo chown postfix:postfix {$pickupFile}");
-            exec("sudo chmod 644 {$pickupFile}");
-
-            $logger->info("Email successfully queued via pickup directory: {$queueId}");
-
-        } finally {
-            // Clean up temp file if it still exists
-            if (file_exists($tempFile)) {
-                unlink($tempFile);
-            }
+        if ($result === false) {
+            // If direct write fails, the directory isn't writable by report-ip user
+            throw new RuntimeException("Cannot write to pickup directory - check permissions");
         }
+
+        // Set same permissions as existing working files
+        chmod($pickupFile, 0644);
+
+        $logger->info("Email successfully queued via pickup directory: {$queueId}");
     }
 
 
