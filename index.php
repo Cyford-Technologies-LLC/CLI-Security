@@ -66,6 +66,26 @@ function processEmailFromPostfix($postfix, $spamFilter, $logger): void
     list($headers, $body) = parseEmail($emailData);
     $logger->info("Parsed headers: " . json_encode($headers));
 
+    // Skip system/security emails to prevent loops
+    $from = $headers['From'] ?? '';
+    $subject = $headers['Subject'] ?? '';
+
+    if (strpos($from, 'report-ip@') !== false ||
+        strpos($subject, '*** SECURITY information') !== false ||
+        strpos($headers['Auto-Submitted'] ?? '', 'auto-generated') !== false) {
+        $logger->info("Skipping system/security email to prevent processing loop");
+        exit(0);
+    }
+
+    // Check if the email has already been processed by the security filter
+    if (!empty($headers['X-Processed-By-Security-Filter'])) {
+        $logger->info("Email already processed by the security filter. Skipping further processing.");
+        exit(0);
+    }
+
+
+
+
     // Check if the email has already been processed by the security filter
     if (!empty($headers['X-Processed-By-Security-Filter'])) {
         $logger->info("Email already processed by the security filter. Skipping further processing.");
