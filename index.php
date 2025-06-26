@@ -378,25 +378,31 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
 
         $pickupDir = '/var/spool/postfix/pickup';
         $queueId = uniqid('sec_', true);
+        $tempFile = "/tmp/{$queueId}";
         $finalFile = "{$pickupDir}/{$queueId}";
 
         try {
-            // Write directly to pickup directory using shell redirection
-            $writeCmd = "echo " . escapeshellarg($emailData) . " | sudo tee {$finalFile} > /dev/null";
-            $writeResult = shell_exec($writeCmd . ' 2>&1');
+            // Write to temp file first
+            file_put_contents($tempFile, $emailData);
+
+            // Use the working sudo mv approach (like the successful files in the directory)
+            $result = shell_exec("sudo mv {$tempFile} {$finalFile} 2>&1");
 
             if (!file_exists($finalFile)) {
-                throw new RuntimeException("Direct write failed. Output: " . ($writeResult ?: 'No output'));
+                throw new RuntimeException("Move failed: " . ($result ?: 'No output'));
             }
 
-            // Set ownership and permissions
+            // Set proper ownership (like the working files)
             shell_exec("sudo chown postfix:postfix {$finalFile} 2>&1");
             shell_exec("sudo chmod 644 {$finalFile} 2>&1");
 
             $logger->info("Email successfully queued via pickup directory: {$queueId}");
 
         } catch (Exception $e) {
-            $logger->error("Postpickup failed: " . $e->getMessage());
+            // Clean up temp file if it exists
+            if (file_exists($tempFile)) {
+                unlink($tempFile);
+            }
             throw $e;
         }
     }
