@@ -382,21 +382,28 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
 
         try {
             // Write to temp file
-            if (file_put_contents($tempFile, $emailData) === false) {
+            $writeResult = file_put_contents($tempFile, $emailData);
+            if ($writeResult === false) {
                 throw new RuntimeException("Failed to write temp file");
+            }
+
+            // Verify temp file exists
+            if (!file_exists($tempFile)) {
+                throw new RuntimeException("Temp file was not created: {$tempFile}");
             }
 
             // Use the exact command that worked from command line
             $command = "sudo mv {$tempFile} {$pickupFile}";
             exec($command, $output, $returnCode);
 
-            if ($returnCode !== 0 || !file_exists($pickupFile)) {
-                throw new RuntimeException("Move command failed. Return code: {$returnCode}, Output: " . implode("\n", $output));
+            // Check if the move actually worked
+            if (!file_exists($pickupFile)) {
+                throw new RuntimeException("File not found after move. Temp file exists: " . (file_exists($tempFile) ? 'yes' : 'no') . ", Return code: {$returnCode}");
             }
 
             // Set ownership like the working files
-            exec("sudo chown postfix:postfix {$pickupFile}", $chownOutput, $chownCode);
-            exec("sudo chmod 644 {$pickupFile}", $chmodOutput, $chmodCode);
+            exec("sudo chown postfix:postfix {$pickupFile}");
+            exec("sudo chmod 644 {$pickupFile}");
 
             $logger->info("Email successfully queued via pickup directory: {$queueId}");
 
