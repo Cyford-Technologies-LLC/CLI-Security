@@ -378,45 +378,26 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
 
         $pickupDir = '/var/spool/postfix/pickup';
         $queueId = uniqid('sec_', true);
-        $tempFile = "/tmp/{$queueId}";
         $finalFile = "{$pickupDir}/{$queueId}";
 
         try {
-            // Write to temp file first
-            if (file_put_contents($tempFile, $emailData) === false) {
-                throw new RuntimeException("Failed to write temporary file");
-            }
-            $logger->info("Temp file created: {$tempFile}");
-
-            // Copy file using sudo with full path
-            $copyCmd = "sudo /bin/cp {$tempFile} {$pickupDir}/";
-            $logger->info("Executing: {$copyCmd}");
-            $copyResult = shell_exec($copyCmd . ' 2>&1');
-            $logger->info("Copy result: " . ($copyResult ?: 'No output'));
-
-            // Check if copy worked
-            if (!file_exists($finalFile)) {
-                // Try alternative approach - direct write with sudo
-                $directCmd = "sudo tee {$finalFile} < {$tempFile} > /dev/null";
-                $logger->info("Trying direct write: {$directCmd}");
-                shell_exec($directCmd . ' 2>&1');
-            }
+            // Write directly to pickup directory using shell redirection
+            $writeCmd = "echo " . escapeshellarg($emailData) . " | sudo tee {$finalFile} > /dev/null";
+            $writeResult = shell_exec($writeCmd . ' 2>&1');
 
             if (!file_exists($finalFile)) {
-                throw new RuntimeException("Both copy methods failed");
+                throw new RuntimeException("Direct write failed. Output: " . ($writeResult ?: 'No output'));
             }
 
             // Set ownership and permissions
-            shell_exec("sudo /bin/chown postfix:postfix {$finalFile} 2>&1");
-            shell_exec("sudo /bin/chmod 644 {$finalFile} 2>&1");
+            shell_exec("sudo chown postfix:postfix {$finalFile} 2>&1");
+            shell_exec("sudo chmod 644 {$finalFile} 2>&1");
 
             $logger->info("Email successfully queued via pickup directory: {$queueId}");
 
-        } finally {
-            // Clean up temp file
-            if (file_exists($tempFile)) {
-                unlink($tempFile);
-            }
+        } catch (Exception $e) {
+            $logger->error("Postpickup failed: " . $e->getMessage());
+            throw $e;
         }
     }
 
