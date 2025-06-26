@@ -238,6 +238,7 @@ function requeueWithPostdrop(string $emailData, $logger): void
     $postdropPath = '/usr/sbin/postdrop';
 
     $logger->info("Delivering email via postdrop...");
+    $logger->info("Email data being sent to postdrop: " . substr($emailData, 0, 500)); // Log first 500 characters
 
     // Open a process for postdrop
     $process = proc_open($postdropPath, [
