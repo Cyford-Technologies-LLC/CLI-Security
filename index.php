@@ -381,6 +381,8 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
 
         // Try direct write first (should work with postdrop group membership)
         $result = file_put_contents($pickupFile, $emailData);
+        $logger->info("Delivering email Result: {$result}");
+
 
         if ($result === false) {
             // Fallback to temp file + move approach
@@ -388,6 +390,7 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
             file_put_contents($tempFile, $emailData);
 
             if (!rename($tempFile, $pickupFile)) {
+                $logger->info("Cannot write to pickup directory - check postdrop group membership");
                 throw new RuntimeException("Cannot write to pickup directory - check postdrop group membership");
             }
         }
