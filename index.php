@@ -376,23 +376,23 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
     {
         $logger->info("Delivering email via pickup directory...");
 
-        // Generate unique filename like the working files in your directory
         $queueId = uniqid('sec_', true);
         $pickupFile = "/var/spool/postfix/pickup/{$queueId}";
-        $logger->info("Requeue   for file:" . $pickupFile);
 
-
-        // Write directly to pickup directory (this must work since you have files there)
+        // Try direct write first (should work with postdrop group membership)
         $result = file_put_contents($pickupFile, $emailData);
 
-        $logger->info("Requeue  Results: " . var_export($result, true) . " for file: {$pickupFile}");
-
         if ($result === false) {
-            // If direct write fails, the directory isn't writable by report-ip user
-            throw new RuntimeException("Cannot write to pickup directory - check permissions");
+            // Fallback to temp file + move approach
+            $tempFile = "/tmp/{$queueId}";
+            file_put_contents($tempFile, $emailData);
+
+            if (!rename($tempFile, $pickupFile)) {
+                throw new RuntimeException("Cannot write to pickup directory - check postdrop group membership");
+            }
         }
 
-        // Set same permissions as existing working files
+        // Set proper permissions for Postfix
         chmod($pickupFile, 0644);
 
         $logger->info("Email successfully queued via pickup directory: {$queueId}");
