@@ -274,17 +274,12 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
 //}
     function requeueWithPostdrop(string $emailData, $logger): void
     {
-        $logger->info("Delivering email via postsuper...");
+        $logger->info("Delivering email via postdrop...");
 
-        // Create temporary file in postfix spool
-        $spoolDir = '/var/spool/postfix/incoming';
-        if (!is_dir($spoolDir)) {
-            $spoolDir = '/var/spool/postfix/maildrop';
-        }
-
-        $tempFile = tempnam($spoolDir, 'requeue_');
+        // Write to temporary file in /tmp (accessible to all users)
+        $tempFile = tempnam('/tmp', 'postfix_requeue_');
         if (!$tempFile) {
-            throw new RuntimeException("Failed to create temporary file in spool directory");
+            throw new RuntimeException("Failed to create temporary file");
         }
 
         try {
@@ -293,28 +288,27 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
                 throw new RuntimeException("Failed to write email data to temporary file");
             }
 
-            // Set proper ownership and permissions
-            chown($tempFile, 'postfix');
-            chgrp($tempFile, 'postfix');
-            chmod($tempFile, 0600);
+            // Make file readable by postfix user
+            chmod($tempFile, 0644);
 
-            // Use postsuper to requeue
-            $command = "/usr/sbin/postsuper -r " . basename($tempFile);
+            // Use postdrop with file redirection (this avoids the record type issue)
+            $command = "cat {$tempFile} | /usr/sbin/postdrop -r";
             $output = shell_exec($command . ' 2>&1');
 
-            if (strpos($output, 'requeued') === false) {
-                throw new RuntimeException("postsuper failed. Output: {$output}");
+            if (!empty($output) && (strpos($output, 'fatal') !== false || strpos($output, 'error') !== false)) {
+                throw new RuntimeException("postdrop failed. Output: {$output}");
             }
 
-            $logger->info("Email successfully requeued with postsuper. Output: {$output}");
+            $logger->info("Email successfully queued with postdrop");
 
         } finally {
-            // Clean up if file still exists
+            // Clean up temporary file
             if (file_exists($tempFile)) {
                 unlink($tempFile);
             }
         }
     }
+
 
 
     function requeueWithSMTP(string $emailData, string $recipient, $logger): void
