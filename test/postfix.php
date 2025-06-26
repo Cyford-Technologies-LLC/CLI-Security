@@ -4,7 +4,7 @@
 function testPostfixPickupWrite($pickupFilePath, $emailData)
 {
     echo "Testing Postfix Pickup Write as PHP user...\n";
-    echo exec('whoami');
+    echo exec('whoami') . "\n";
 
 
     try {

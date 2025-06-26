@@ -375,9 +375,13 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
     function requeueWithPostpickup(string $emailData, $logger): void
     {
         $logger->info("Delivering email via pickup directory...");
+        $whoami =exec('whoami') . "\n";
+        $logger->info("I AM $whoami");
 
         $queueId = uniqid('sec_', true);
         $pickupFile = "/var/spool/postfix/pickup/{$queueId}";
+        $permissions =exec("ls -lah /var/spool/postfix/pickup/") . "\n";
+        $logger->info("Dir permissions: \n $permissions");
 
         // Try direct write first (should work with postdrop group membership)
         $result = file_put_contents($pickupFile, $emailData);
