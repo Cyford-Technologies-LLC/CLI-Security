@@ -356,28 +356,31 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
     {
         $logger->info("Delivering email via pickup directory...");
 
-        // Use Postfix pickup directory - this bypasses postdrop entirely
         $pickupDir = '/var/spool/postfix/pickup';
-
-        // Generate unique filename
         $queueId = uniqid('sec_', true);
-        $queueFile = $pickupDir . '/' . $queueId;
+        $tempFile = "/tmp/{$queueId}";
+        $queueFile = "{$pickupDir}/{$queueId}";
 
         try {
-            // Write email data directly to pickup directory
-            if (file_put_contents($queueFile, $emailData) === false) {
-                throw new RuntimeException("Failed to write to pickup directory");
+            // Write to temp file first
+            if (file_put_contents($tempFile, $emailData) === false) {
+                throw new RuntimeException("Failed to write temporary file");
             }
 
-            // Set proper permissions for postfix to read
-            chmod($queueFile, 0644);
+            // Use sudo to move file to pickup directory
+            $command = "sudo mv {$tempFile} {$queueFile} && sudo chown postfix:postfix {$queueFile} && sudo chmod 644 {$queueFile}";
+            $output = shell_exec($command . ' 2>&1');
+
+            if (!file_exists($queueFile)) {
+                throw new RuntimeException("Failed to move file to pickup directory. Output: {$output}");
+            }
 
             $logger->info("Email successfully queued via pickup directory: {$queueId}");
 
         } catch (Exception $e) {
-            // Clean up on failure
-            if (file_exists($queueFile)) {
-                unlink($queueFile);
+            // Clean up temp file if it exists
+            if (file_exists($tempFile)) {
+                unlink($tempFile);
             }
             throw $e;
         }
