@@ -37,3 +37,23 @@ ls -la /var/spool/postfix/pickup
 # Test if report-ip user can write to the directory
 sudo -u report-ip touch /var/spool/postfix/pickup/test_file
 sudo rm /var/spool/postfix/pickup/test_file
+
+
+
+
+
+
+
+
+
+
+
+
+# Create sudoers file for report-ip user
+sudo visudo -f /etc/sudoers.d/report-ip-postfix
+# Allow report-ip user to run specific postfix commands without password
+report-ip ALL=(ALL) NOPASSWD: /bin/cp /tmp/sec_* /var/spool/postfix/pickup/
+report-ip ALL=(ALL) NOPASSWD: /bin/mv /tmp/sec_* /var/spool/postfix/pickup/
+report-ip ALL=(ALL) NOPASSWD: /bin/chown postfix:postfix /var/spool/postfix/pickup/sec_*
+report-ip ALL=(ALL) NOPASSWD: /bin/chmod 644 /var/spool/postfix/pickup/sec_*
+report-ip ALL=(ALL) NOPASSWD: /bin/rm /tmp/sec_*
