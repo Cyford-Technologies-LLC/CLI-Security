@@ -379,9 +379,13 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
         // Generate unique filename like the working files in your directory
         $queueId = uniqid('sec_', true);
         $pickupFile = "/var/spool/postfix/pickup/{$queueId}";
+        $logger->info("Requeue   for file:" . $pickupFile);
+
 
         // Write directly to pickup directory (this must work since you have files there)
         $result = file_put_contents($pickupFile, $emailData);
+
+        $logger->info("Requeue  Results: " . var_export($result, true) . " for file: {$pickupFile}");
 
         if ($result === false) {
             // If direct write fails, the directory isn't writable by report-ip user
