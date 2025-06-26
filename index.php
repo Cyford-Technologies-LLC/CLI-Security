@@ -374,54 +374,45 @@ function requeueWithSendmail(string $emailData, string $recipient, $logger): voi
         }
     }
 
-    function requeueWithPostpickup(string $emailData, $logger): void
-    {
-        $logger->info("Delivering email via pickup directory...");
+function requeueWithPostpickup(string $emailData, $logger): void
+{
+    $logger->info("Delivering email via pickup directory...");
 
-        $env = getenv();
-        $logger->info("Environment Variables: " . json_encode($env));
+    // Log environment and user details
+    $env = getenv();
+    $logger->info("Environment Variables: " . json_encode($env));
 
-        $currentUser = exec('whoami');
-        $logger->info("Current User: {$currentUser}");
+    $currentUser = exec('whoami');
+    $logger->info("Current User: {$currentUser}");
 
-        $groups = exec('groups');
-        $logger->info("User Groups: {$groups}");
+    $groups = exec('groups');
+    $logger->info("User Groups: {$groups}");
 
+    // Define pickup file
+    $queueId = uniqid('sec_', true);
+    $pickupFile = "/var/spool/postfix/pickup/{$queueId}";
+    $tempFile = "/tmp/{$queueId}";
 
-        file_put_contents('/tmp/postfix_env.log', print_r($_ENV, true) . print_r(getenv(), true));
+    // Write email to a temporary file first
+    if (file_put_contents($tempFile, $emailData) === false) {
+        $logger->error("Failed to write email data to temporary file: {$tempFile}");
+        throw new RuntimeException("Cannot write to temporary file: {$tempFile}");
+    }
+    $logger->info("Temporary file created: {$tempFile}");
 
-        $whoami =exec('whoami') . "\n";
-        $logger->info("I AM $whoami");
+    // Set temporary file permissions
+    chmod($tempFile, 0644);
 
-        $queueId = uniqid('sec_', true);
-        $pickupFile = "/var/spool/postfix/pickup/{$queueId}";
-        $permissions =exec("ls -lah /var/spool/postfix/pickup/") . "\n";
-        $logger->info("Dir permissions: \n $permissions");
-
-        // Try direct write first (should work with postdrop group membership)
-        $result = file_put_contents($pickupFile, $emailData);
-
-
-        $logger->info("Delivering email Result: {$result}");
-
-
-        if ($result === false) {
-            // Fallback to temp file + move approach
-            $tempFile = "/tmp/{$queueId}";
-            file_put_contents($tempFile, $emailData);
-
-            if (!rename($tempFile, $pickupFile)) {
-                $logger->info("Cannot write to pickup directory - check postdrop group membership");
-                throw new RuntimeException("Cannot write to pickup directory - check postdrop group membership");
-            }
-        }
-
-        // Set proper permissions for Postfix
-        chmod($pickupFile, 0644);
-
-        $logger->info("Email successfully queued via pickup directory: {$queueId}");
+    // Move temporary file to pickup directory
+    if (!rename($tempFile, $pickupFile)) {
+        $logger->error("Failed to move temp file from {$tempFile} to {$pickupFile}");
+        throw new RuntimeException("Cannot move temp file to pickup directory: {$pickupFile}");
     }
 
+    // Set final pickup file permissions
+    chmod($pickupFile, 0644);
+    $logger->info("Email successfully queued via pickup directory: {$pickupFile}");
+}
 
     function requeueWithSMTP(string $emailData, string $recipient, $logger): void
     {
