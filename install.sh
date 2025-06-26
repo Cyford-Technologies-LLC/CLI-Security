@@ -1,59 +1,51 @@
+#!/bin/bash
 
-
-# Add report-ip user to postfix group
-sudo usermod -a -G postfix report-ip
-
-# Make pickup directory group writable
-sudo chmod g+w /var/spool/postfix/pickup
-
-# Or alternatively, change ownership to allow report-ip user
-sudo chown postfix:postfix /var/spool/postfix/pickup
-sudo chmod 775 /var/spool/postfix/pickup
-
-
-
-
-#  create a directory for the queue files
 # Get the queue directory from postfix
 QUEUE_DIR=$(postconf -h queue_directory)
 echo "Postfix queue directory: $QUEUE_DIR"
 
-# Create pickup directory
+# Create pickup directory if it doesn't exist
 sudo mkdir -p $QUEUE_DIR/pickup
 sudo chown postfix:postfix $QUEUE_DIR/pickup
-sudo chmod 730 $QUEUE_DIR/pickup
+sudo chmod 775 $QUEUE_DIR/pickup
 
 # Add report-ip user to postfix group
 sudo usermod -a -G postfix report-ip
-# Make the pickup directory writable by the postfix group
-sudo chmod 775 /var/spool/postfix/pickup
 
-# Ensure report-ip user is in postfix group and restart to apply group changes
-sudo usermod -a -G postfix report-ip
-
-# Check current permissions
-ls -la /var/spool/postfix/pickup
-
-# Test if report-ip user can write to the directory
-sudo -u report-ip touch /var/spool/postfix/pickup/test_file
-sudo rm /var/spool/postfix/pickup/test_file
-
-
-
-
-
-
-
-
-
-
-
-
-# Create sudoers file for report-ip user
-sudo visudo -f /etc/sudoers.d/report-ip-postfix
+# Create sudoers file for report-ip user (non-interactive)
+# Create sudoers file for report-ip user (non-interactive)
+sudo tee /etc/sudoers.d/report-ip-postfix > /dev/null << 'EOF'
 # Allow report-ip user to run specific postfix commands without password
 report-ip ALL=(ALL) NOPASSWD: /bin/cp /tmp/sec_* /var/spool/postfix/pickup/
 report-ip ALL=(ALL) NOPASSWD: /bin/mv /tmp/sec_* /var/spool/postfix/pickup/
 report-ip ALL=(ALL) NOPASSWD: /bin/chown postfix:postfix /var/spool/postfix/pickup/sec_*
 report-ip ALL=(ALL) NOPASSWD: /bin/chmod 644 /var/spool/postfix/pickup/sec_*
 report-ip ALL=(ALL) NOPASSWD: /bin/rm /tmp/sec_*
+EOF
+
+
+# Set proper permissions on sudoers file
+sudo chmod 440 /etc/sudoers.d/report-ip-postfix
+
+# Kill existing report-ip processes to apply group changes
+sudo pkill -u report-ip || true
+
+# Test the setup
+echo "Testing sudoers configuration..."
+sudo -u report-ip sudo -n cp /dev/null /tmp/test_sec_123 2>/dev/null && echo "Sudoers OK" || echo "Sudoers FAILED"
+
+# Test pickup directory access
+echo "Testing pickup directory access..."
+if sudo -u report-ip touch $QUEUE_DIR/pickup/test_file 2>/dev/null; then
+    echo "SUCCESS: report-ip user can write to pickup directory"
+    sudo rm $QUEUE_DIR/pickup/test_file
+else
+    echo "FAILED: report-ip user cannot write to pickup directory"
+    echo "Current permissions:"
+    ls -la $QUEUE_DIR/pickup
+    echo "User groups:"
+    sudo -u report-ip groups
+fi
+
+echo "Setup complete. Restart Postfix to ensure all changes take effect:"
+echo "sudo systemctl restart postfix"

@@ -35,8 +35,9 @@ function initializeService(string $serviceName, callable $initializer, Logger $l
 
 // Turn on detailed error reporting if enabled in config
 if (!empty($config['errors']['report_errors']) && $config['errors']['report_errors'] === 1) {
-    ini_set('display_errors', '1');
-    ini_set('display_startup_errors', '1');
+    ini_set('display_errors', '0');
+    ini_set('display_startup_errors', '0');
+    ini_set('log_errors', '1');
     error_reporting(E_ALL);
 
     $logger->info('Detailed error reporting is enabled.');
