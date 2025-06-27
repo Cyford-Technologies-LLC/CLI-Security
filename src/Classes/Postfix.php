@@ -163,6 +163,11 @@ class Postfix
 
         if ($isSpam) {
             $logger->warning("Email flagged as spam. Processing according to spam_handling config.");
+            
+            // Log detailed spam information
+            $spamReason = $spamFilter->getLastSpamReason() ?? 'Unknown spam detection';
+            $this->logSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
+            
             $this->handleSpamEmail($emailData, $headers, $recipient, $logger);
             return;
         }
@@ -660,6 +665,50 @@ EOF;
         }
         
         return $emailData . $footerText;
+    }
+
+    /**
+     * Log spam email with full details
+     */
+    private function logSpamEmail(string $emailData, array $headers, string $recipient, string $spamReason, $logger): void
+    {
+        global $config;
+        $spamLogFile = $config['postfix']['spam_handling']['spam_log_file'] ?? '/var/log/cyford-security/spam.log';
+        
+        // Ensure spam log directory exists
+        $logDir = dirname($spamLogFile);
+        if (!is_dir($logDir)) {
+            mkdir($logDir, 0755, true);
+        }
+        
+        $timestamp = date('Y-m-d H:i:s');
+        $from = $headers['From'] ?? 'unknown';
+        $subject = $headers['Subject'] ?? 'No Subject';
+        $messageId = $headers['Message-ID'] ?? 'unknown';
+        
+        $logEntry = <<<EOF
+================================================================================
+SPAM DETECTED: {$timestamp}
+================================================================================
+Recipient: {$recipient}
+From: {$from}
+Subject: {$subject}
+Message-ID: {$messageId}
+Spam Reason: {$spamReason}
+
+--- RAW EMAIL DATA ---
+{$emailData}
+--- END RAW EMAIL DATA ---
+
+
+EOF;
+        
+        // Append to spam log file
+        if (file_put_contents($spamLogFile, $logEntry, FILE_APPEND | LOCK_EX) === false) {
+            $logger->error("Failed to write to spam log file: {$spamLogFile}");
+        } else {
+            $logger->info("Spam email logged to: {$spamLogFile}");
+        }
     }
 
     /**

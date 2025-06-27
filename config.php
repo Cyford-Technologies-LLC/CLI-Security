@@ -19,6 +19,7 @@ return [
             'quarantine_folder' => 'Spam', // Folder name to create for spam emails
             'add_footer' => true, // Add spam filter footer to clean emails
             'footer_text' => '\n\n--- This email has been scanned by Cyford Web Armor ---',
+            'spam_log_file' => '/var/log/cyford-security/spam.log', // Detailed spam log with raw emails
         ],
         'whitelist' => [
             'ips_file' => '/usr/local/share/cyford/security/lists/whitelist_ips.txt',
