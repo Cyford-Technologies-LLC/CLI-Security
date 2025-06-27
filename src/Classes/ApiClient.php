@@ -1,6 +1,9 @@
 <?php
 namespace Cyford\Security\Classes;
 
+use Exception;
+use RuntimeException;
+
 class ApiClient
 {
     private string $loginEndpoint;
@@ -96,6 +99,7 @@ class ApiClient
      * @param array $options
      * @return array
      * @throws RuntimeException
+     * @throws \JsonException
      */
     private function sendRequest(string $url, string $method = 'POST', array $data = [], array $headers = [], array $options = []): array
     {
@@ -130,7 +134,7 @@ class ApiClient
 
         return [
             'status_code' => $httpCode,
-            'response' => json_decode($response, true),
+            'response' => json_decode($response, true, 512, JSON_THROW_ON_ERROR),
         ];
     }
 }
