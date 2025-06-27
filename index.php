@@ -85,8 +85,10 @@ function processEmailFromPostfix($postfix, $spamFilter, $logger): void
                   ", In raw data: " . ($hasSecurityHeaderInRaw ? 'YES' : 'NO'));
     
     if ($hasSecurityHeader || $hasSecurityHeaderInRaw) {
-        $logger->info("Email already processed by the security filter. Skipping further processing.");
-        exit(0);
+        $logger->info("Email already processed by the security filter. Allowing normal delivery.");
+        // Don't exit - let the email continue to normal delivery
+        // Just return without requeuing again
+        return;
     }
 
     // Detect spam using SpamFilter
