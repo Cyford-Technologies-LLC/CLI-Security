@@ -28,16 +28,12 @@ class Postfix
 
         // Ensure the backup directory exists
         if (!is_dir($this->backupDirectory)) {
-            if (!mkdir($concurrentDirectory = $this->backupDirectory, 0755, true) && !is_dir($concurrentDirectory)) {
-                throw new \RuntimeException(sprintf('Directory "%s" was not created', $concurrentDirectory));
-            }
+            mkdir($this->backupDirectory, 0755, true);
         }
     }
 
     /**
      * Check if Postfix is configured for integration.
-     *
-     * @return bool
      */
     public function checkConfig(): bool
     {
@@ -69,8 +65,6 @@ class Postfix
 
     /**
      * Automatically apply missing configurations if allowed.
-     *
-     * @return void
      */
     public function autoConfig(): void
     {
@@ -120,150 +114,9 @@ class Postfix
         // Reload Postfix
         $this->reload();
     }
-    
 
-    
-    /**
-     * Generate IP-based master.cf configuration.
-     *
-     * @param string $publicIP
-     * @return string
-     */
-    private function generateIPBasedMasterConfig(string $publicIP): string
-    {
-        return <<<EOF
-# Postfix master process configuration file.
-#
-# ==========================================================================
-# service type  private unpriv  chroot  wakeup  maxproc command + args
-#               (yes)   (yes)   (yes)   (never) (100)
-# ==========================================================================
-
-# External SMTP (with content filter for security)
-{$publicIP}:smtp inet  n       -       n       -       -       smtpd
-  -o content_filter=security-filter:dummy
-
-# Internal SMTP (no content filter)
-127.0.0.1:smtp inet  n       -       n       -       -       smtpd
-  -o smtpd_client_restrictions=permit_mynetworks,reject
-  -o content_filter=
-
-# Security filter service
-security-filter unix - n n - - pipe
-  flags=Rq user=report-ip argv=/usr/bin/php /usr/local/share/cyford/security/index.php --input_type=postfix --ips=\${{client_address}} --categories=3
-
-# Standard services
-pickup    unix  n       -       y       60      1       pickup
-cleanup   unix  n       -       y       -       0       cleanup
-qmgr      unix  n       -       n       300     1       qmgr
-tlsmgr    unix  -       -       y       1000?   1       tlsmgr
-rewrite   unix  -       -       y       -       -       trivial-rewrite
-bounce    unix  -       -       y       -       0       bounce
-defer     unix  -       -       y       -       0       bounce
-trace     unix  -       -       y       -       0       bounce
-verify    unix  -       -       y       -       1       verify
-flush     unix  n       -       y       1000?   0       flush
-proxymap  unix  -       -       n       -       -       proxymap
-proxywrite unix -       -       n       -       1       proxymap
-smtp      unix  -       -       y       -       -       smtp
-relay     unix  -       -       y       -       -       smtp
-showq     unix  n       -       y       -       -       showq
-error     unix  -       -       y       -       -       error
-retry     unix  -       -       y       -       -       error
-discard   unix  -       -       y       -       -       discard
-local     unix  -       n       n       -       -       local
-virtual   unix  -       n       n       -       -       virtual
-lmtp      unix  -       -       y       -       -       lmtp
-anvil     unix  -       -       y       -       1       anvil
-scache    unix  -       -       y       -       1       scache
-postlog   unix-dgram n  -       n       -       1       postlogd
-EOF;
-    }
-    
-    /**
-     * Remove old security-related entries from master.cf
-     *
-     * @param string $content
-     * @return string
-     */
-    private function removeOldEntries(string $content): string
-    {
-        // Remove old generic smtp entry with content_filter
-        $content = preg_replace('/^smtp\s+inet.*content_filter=security-filter:dummy.*$/m', '', $content);
-        
-        // Remove old security-filter entry
-        $content = preg_replace('/^security-filter\s+unix.*$/m', '', $content);
-        $content = preg_replace('/^\s+flags=Rq.*security.*$/m', '', $content);
-        
-        // Remove any existing IP-based entries to avoid duplicates
-        $content = preg_replace('/^\d+\.\d+\.\d+\.\d+:smtp\s+inet.*$/m', '', $content);
-        $content = preg_replace('/^127\.0\.0\.1:smtp\s+inet.*$/m', '', $content);
-        $content = preg_replace('/^\s+-o\s+content_filter=security-filter:dummy.*$/m', '', $content);
-        $content = preg_replace('/^\s+-o\s+content_filter=\s*$/m', '', $content);
-        $content = preg_replace('/^\s+-o\s+smtpd_client_restrictions=permit_mynetworks,reject.*$/m', '', $content);
-        
-        // Clean up extra blank lines
-        $content = preg_replace('/\n\s*\n\s*\n/', "\n\n", $content);
-        
-        return $content;
-    }
-    
-    /**
-     * Generate only the IP-based entries to add to master.cf
-     *
-     * @param string $publicIP
-     * @return string
-     */
-    private function generateIPBasedEntries(string $publicIP): string
-    {
-        return <<<EOF
-# Cyford Security Filter Configuration
-# External SMTP (with content filter for security)
-{$publicIP}:smtp inet  n       -       n       -       -       smtpd
-  -o content_filter=security-filter:dummy
-
-# Internal SMTP (no content filter)
-127.0.0.1:smtp inet  n       -       n       -       -       smtpd
-  -o smtpd_client_restrictions=permit_mynetworks,reject
-  -o content_filter=
-
-# Security filter service
-security-filter unix - n n - - pipe
-  flags=Rq user=report-ip argv=/usr/bin/php /usr/local/share/cyford/security/index.php --input_type=postfix --ips=\${{client_address}} --categories=3
-EOF;
-    }
-    /**
-     * Create a timestamped backup of a file before modifying it.
-     *
-     * @param string $filePath Path to the file to back up.
-     * @return void
-     */
-    private function backupFile(string $filePath): void
-    {
-        $timestamp = date('Ymd_His');
-        $backupDir = $this->backupDirectory;
-        $backupFile = "{$backupDir}/" . basename($filePath) . ".backup_{$timestamp}";
-
-        // Ensure backup directory exists
-        if (!is_dir($backupDir)) {
-            if (!mkdir($backupDir, 0755, true) && !is_dir($backupDir)) {
-                throw new RuntimeException("Failed to create backup directory: {$backupDir}");
-            }
-        }
-
-        // Create the backup
-        if (!copy($filePath, $backupFile)) {
-            throw new RuntimeException("Failed to create backup for: {$filePath}");
-        }
-
-        echo "Backup created: {$backupFile}\n";
-    }
     /**
      * Process email from Postfix content filter
-     *
-     * @param object $spamFilter
-     * @param object $logger
-     * @return void
      */
     public function processEmail($spamFilter, $logger): void
     {
@@ -308,6 +161,53 @@ EOF;
         $logger->info("Recipient resolved: {$recipient}");
 
         $this->requeueEmail($emailData, $recipient, $logger);
+    }
+
+    /**
+     * Remove old security-related entries from master.cf
+     */
+    private function removeOldEntries(string $content): string
+    {
+        // Remove old generic smtp entry with content_filter
+        $content = preg_replace('/^smtp\s+inet.*content_filter=security-filter:dummy.*$/m', '', $content);
+        
+        // Remove old security-filter entry
+        $content = preg_replace('/^security-filter\s+unix.*$/m', '', $content);
+        $content = preg_replace('/^\s+flags=Rq.*security.*$/m', '', $content);
+        
+        // Remove any existing IP-based entries to avoid duplicates
+        $content = preg_replace('/^\d+\.\d+\.\d+\.\d+:smtp\s+inet.*$/m', '', $content);
+        $content = preg_replace('/^127\.0\.0\.1:smtp\s+inet.*$/m', '', $content);
+        $content = preg_replace('/^\s+-o\s+content_filter=security-filter:dummy.*$/m', '', $content);
+        $content = preg_replace('/^\s+-o\s+content_filter=\s*$/m', '', $content);
+        $content = preg_replace('/^\s+-o\s+smtpd_client_restrictions=permit_mynetworks,reject.*$/m', '', $content);
+        
+        // Clean up extra blank lines
+        $content = preg_replace('/\n\s*\n\s*\n/', "\n\n", $content);
+        
+        return $content;
+    }
+    
+    /**
+     * Generate only the IP-based entries to add to master.cf
+     */
+    private function generateIPBasedEntries(string $publicIP): string
+    {
+        return <<<EOF
+# Cyford Security Filter Configuration
+# External SMTP (with content filter for security)
+{$publicIP}:smtp inet  n       -       n       -       -       smtpd
+  -o content_filter=security-filter:dummy
+
+# Internal SMTP (no content filter)
+127.0.0.1:smtp inet  n       -       n       -       -       smtpd
+  -o smtpd_client_restrictions=permit_mynetworks,reject
+  -o content_filter=
+
+# Security filter service
+security-filter unix - n n - - pipe
+  flags=Rq user=report-ip argv=/usr/bin/php /usr/local/share/cyford/security/index.php --input_type=postfix --ips=\${{client_address}} --categories=3
+EOF;
     }
 
     /**
@@ -395,7 +295,7 @@ EOF;
         if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
             $message = "Invalid recipient email after extraction: {$recipient}";
             $logger->error($message);
-            throw new InvalidArgumentException($message);
+            throw new \InvalidArgumentException($message);
         }
 
         // Add custom header to prevent reprocessing
@@ -602,9 +502,31 @@ EOF;
     }
 
     /**
+     * Create a timestamped backup of a file before modifying it.
+     */
+    private function backupFile(string $filePath): void
+    {
+        $timestamp = date('Ymd_His');
+        $backupDir = $this->backupDirectory;
+        $backupFile = "{$backupDir}/" . basename($filePath) . ".backup_{$timestamp}";
+
+        // Ensure backup directory exists
+        if (!is_dir($backupDir)) {
+            if (!mkdir($backupDir, 0755, true) && !is_dir($backupDir)) {
+                throw new RuntimeException("Failed to create backup directory: {$backupDir}");
+            }
+        }
+
+        // Create the backup
+        if (!copy($filePath, $backupFile)) {
+            throw new RuntimeException("Failed to create backup for: {$filePath}");
+        }
+
+        echo "Backup created: {$backupFile}\n";
+    }
+
+    /**
      * Reload Postfix service.
-     *
-     * @return void
      */
     public function reload(): void
     {
@@ -619,6 +541,9 @@ EOF;
         echo "Postfix reload output: {$output}\n";
     }
 
+    /**
+     * Parse headers from raw header string
+     */
     function parseHeaders($rawHeaders)
     {
         $headers = [];
@@ -631,48 +556,9 @@ EOF;
         }
         return $headers;
     }
+
     /**
      * Get Postfix service status.
-     *
-     * @return string Postfix status output.
-     */
-    public function getStatus(): string
-    {
-        $command = "systemctl status postfix";
-        $output = shell_exec($command);
-
-        if (!$output) {
-            throw new RuntimeException('Failed to retrieve Postfix status.');
-        }
-
-        return $output;
-    }onfiguration...\n";
-
-        $output = shell_exec("sudo {$this->postfixCommand} reload 2>&1");
-
-        if (empty($output)) {
-            throw new RuntimeException("Failed to reload Postfix. Ensure the Postfix service is running.");
-        }
-
-        echo "Postfix reload output: {$output}\n";
-    }
-
-    function parseHeaders($rawHeaders)
-    {
-        $headers = [];
-        $lines = explode("\n", $rawHeaders);
-        foreach ($lines as $line) {
-            if (strpos($line, ':') !== false) {
-                list($key, $value) = explode(':', $line, 2);
-                $headers[trim($key)] = trim($value);
-            }
-        }
-        return $headers;
-    }
-    /**
-     * Get Postfix service status.
-     *
-     * @return string Postfix status output.
      */
     public function getStatus(): string
     {
@@ -685,5 +571,4 @@ EOF;
 
         return $output;
     }
-
 }
