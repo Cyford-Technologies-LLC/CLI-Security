@@ -577,9 +577,18 @@ EOF;
         
         $logger->info("Quarantining spam email to {$spamFolder} folder for {$recipient}");
         
+        // Resolve alias to real user
+        $realUser = $this->resolveEmailAlias($recipient, $logger);
+        if (!$realUser) {
+            $logger->error("Could not resolve recipient {$recipient} to a real user. Rejecting email.");
+            $this->bounceSpamEmail([], $logger);
+            return;
+        }
+        
+        $logger->info("Resolved {$recipient} to real user: {$realUser}");
+        
         // Get user's home directory and maildir path
-        $username = explode('@', $recipient)[0];
-        $maildirPath = "/home/{$username}/Maildir/.{$spamFolder}";
+        $maildirPath = "/home/{$realUser}/Maildir/.{$spamFolder}";
         
         // Create spam folder if it doesn't exist
         if (!is_dir($maildirPath)) {
@@ -600,6 +609,29 @@ EOF;
             $logger->error("Failed to quarantine spam email. Rejecting instead.");
             $this->bounceSpamEmail([], $logger);
         }
+    }
+
+    /**
+     * Resolve email alias to real user using cached system
+     */
+    private function resolveEmailAlias(string $email, $logger): ?string
+    {
+        $username = explode('@', $email)[0];
+        
+        // First check if it's a real system user
+        if ($this->systems->isRealUser($username)) {
+            return $username;
+        }
+        
+        // Use cached alias mapping
+        $realUser = $this->systems->getAliasMapping($email);
+        if ($realUser) {
+            $logger->info("Found cached alias mapping: {$email} -> {$realUser}");
+            return $realUser;
+        }
+        
+        $logger->warning("Could not resolve alias {$email} to a real user");
+        return null;
     }
 
     /**

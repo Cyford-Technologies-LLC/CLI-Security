@@ -141,6 +141,150 @@ class Systems
     }
 
     /**
+     * Get cached alias mapping or load from files
+     */
+    public function getAliasMapping(string $email): ?string
+    {
+        $cacheFile = '/tmp/cyford_alias_cache.json';
+        $aliases = $this->loadAliasCache($cacheFile);
+        
+        $username = explode('@', $email)[0];
+        
+        // Check direct email mapping first
+        if (isset($aliases[$email])) {
+            return $aliases[$email];
+        }
+        
+        // Check username mapping
+        if (isset($aliases[$username])) {
+            return $aliases[$username];
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Load alias cache from memory or rebuild if needed
+     */
+    private function loadAliasCache(string $cacheFile): array
+    {
+        // Check if cache exists and is recent (less than 5 minutes old)
+        if (file_exists($cacheFile) && (time() - filemtime($cacheFile)) < 300) {
+            $cached = json_decode(file_get_contents($cacheFile), true);
+            if ($cached !== null) {
+                return $cached;
+            }
+        }
+        
+        // Rebuild cache
+        $aliases = $this->buildAliasCache();
+        file_put_contents($cacheFile, json_encode($aliases));
+        
+        return $aliases;
+    }
+    
+    /**
+     * Build alias cache from system files
+     */
+    private function buildAliasCache(): array
+    {
+        $aliases = [];
+        
+        // Load real users first
+        $realUsers = $this->getRealUsers();
+        
+        // Load system aliases (/etc/aliases)
+        if (file_exists('/etc/aliases')) {
+            $content = file_get_contents('/etc/aliases');
+            $lines = explode("\n", $content);
+            
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if (empty($line) || $line[0] === '#') continue;
+                
+                if (preg_match('/^([^:]+):\s*(.+)$/', $line, $matches)) {
+                    $alias = trim($matches[1]);
+                    $target = trim($matches[2]);
+                    
+                    // Handle multiple targets, find first real user
+                    $targets = preg_split('/[,\s]+/', $target);
+                    foreach ($targets as $t) {
+                        $t = trim($t);
+                        if (in_array($t, $realUsers)) {
+                            $aliases[$alias] = $t;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Load virtual aliases (/etc/postfix/virtual)
+        if (file_exists('/etc/postfix/virtual')) {
+            $content = file_get_contents('/etc/postfix/virtual');
+            $lines = explode("\n", $content);
+            
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if (empty($line) || $line[0] === '#') continue;
+                
+                if (preg_match('/^([^\s]+)\s+(.+)$/', $line, $matches)) {
+                    $virtual = trim($matches[1]);
+                    $target = trim($matches[2]);
+                    $targetUser = explode('@', $target)[0];
+                    
+                    if (in_array($targetUser, $realUsers)) {
+                        $aliases[$virtual] = $targetUser;
+                    }
+                }
+            }
+        }
+        
+        return $aliases;
+    }
+    
+    /**
+     * Get list of real system users
+     */
+    private function getRealUsers(): array
+    {
+        $users = [];
+        
+        if (file_exists('/etc/passwd')) {
+            $content = file_get_contents('/etc/passwd');
+            $lines = explode("\n", $content);
+            
+            foreach ($lines as $line) {
+                if (preg_match('/^([^:]+):/', $line, $matches)) {
+                    $users[] = $matches[1];
+                }
+            }
+        }
+        
+        return $users;
+    }
+    
+    /**
+     * Check if user is real system user
+     */
+    public function isRealUser(string $username): bool
+    {
+        $realUsers = $this->getRealUsers();
+        return in_array($username, $realUsers);
+    }
+    
+    /**
+     * Clear alias cache (for manual refresh)
+     */
+    public function clearAliasCache(): void
+    {
+        $cacheFile = '/tmp/cyford_alias_cache.json';
+        if (file_exists($cacheFile)) {
+            unlink($cacheFile);
+        }
+    }
+
+    /**
      * Format bytes into a readable size.
      *
      * @param int $bytes
