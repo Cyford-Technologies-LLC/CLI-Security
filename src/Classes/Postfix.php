@@ -154,14 +154,6 @@ class Postfix
 
         // Detect spam
         $isSpam = $spamFilter->isSpam($headers, $body);
-        if ($isSpam) {
-            $logger->warning("Email flagged as spam. Processing terminated.");
-            exit(0);
-        }
-
-        $logger->info("Email is clean of spam. Proceeding with requeue.");
-
-        // Extract recipient and requeue
         $recipient = $this->extractEmailAddress($headers['To'] ?? '');
         if (empty($recipient)) {
             $logger->error("Recipient not found or invalid in email headers.");
@@ -169,6 +161,17 @@ class Postfix
         }
         $logger->info("Recipient resolved: {$recipient}");
 
+        if ($isSpam) {
+            $logger->warning("Email flagged as spam. Processing according to spam_handling config.");
+            $this->handleSpamEmail($emailData, $headers, $recipient, $logger);
+            return;
+        }
+
+        $logger->info("Email is clean of spam. Proceeding with requeue.");
+        
+        // Add footer if configured
+        $emailData = $this->addFooterIfConfigured($emailData);
+        
         $this->requeueEmail($emailData, $recipient, $logger);
     }
 
@@ -508,6 +511,144 @@ EOF;
                 unlink($tempFile);
             }
         }
+    }
+
+    /**
+     * Handle spam email according to configuration
+     */
+    private function handleSpamEmail(string $emailData, array $headers, string $recipient, $logger): void
+    {
+        global $config;
+        $spamAction = $config['postfix']['spam_handling']['action'] ?? 'reject';
+        
+        switch ($spamAction) {
+            case 'reject':
+                $this->bounceSpamEmail($headers, $logger);
+                break;
+                
+            case 'quarantine':
+                $this->quarantineSpamEmail($emailData, $recipient, $logger);
+                break;
+                
+            case 'allow':
+                $logger->info("Spam email allowed through as per configuration.");
+                $emailData = $this->addFooterIfConfigured($emailData, true);
+                $this->requeueEmail($emailData, $recipient, $logger);
+                break;
+                
+            default:
+                $logger->warning("Unknown spam action: {$spamAction}. Rejecting email.");
+                $this->bounceSpamEmail($headers, $logger);
+        }
+    }
+
+    /**
+     * Bounce spam email back to sender
+     */
+    private function bounceSpamEmail(array $headers, $logger): void
+    {
+        global $config;
+        $bounceMessage = $config['postfix']['spam_handling']['bounce_message'] ?? 'Message rejected due to spam content.';
+        $from = $headers['From'] ?? 'unknown';
+        
+        $logger->info("Bouncing spam email from: {$from}");
+        
+        // Create bounce message
+        $bounceEmail = $this->createBounceMessage($headers, $bounceMessage);
+        
+        // Send bounce via sendmail
+        $tempFile = tempnam('/tmp', 'bounce_');
+        file_put_contents($tempFile, $bounceEmail);
+        
+        $command = "/usr/sbin/sendmail -t < {$tempFile}";
+        shell_exec($command);
+        
+        unlink($tempFile);
+        $logger->info("Bounce message sent to sender.");
+    }
+
+    /**
+     * Quarantine spam email to specified folder
+     */
+    private function quarantineSpamEmail(string $emailData, string $recipient, $logger): void
+    {
+        global $config;
+        $spamFolder = $config['postfix']['spam_handling']['quarantine_folder'] ?? 'Spam';
+        
+        $logger->info("Quarantining spam email to {$spamFolder} folder for {$recipient}");
+        
+        // Get user's home directory and maildir path
+        $username = explode('@', $recipient)[0];
+        $maildirPath = "/home/{$username}/Maildir/.{$spamFolder}";
+        
+        // Create spam folder if it doesn't exist
+        if (!is_dir($maildirPath)) {
+            mkdir($maildirPath, 0755, true);
+            mkdir($maildirPath . '/cur', 0755, true);
+            mkdir($maildirPath . '/new', 0755, true);
+            mkdir($maildirPath . '/tmp', 0755, true);
+            $logger->info("Created spam folder: {$maildirPath}");
+        }
+        
+        // Save email to spam folder
+        $filename = time() . '.' . uniqid() . '.spam';
+        $spamFile = $maildirPath . '/new/' . $filename;
+        
+        if (file_put_contents($spamFile, $emailData)) {
+            $logger->info("Spam email quarantined to: {$spamFile}");
+        } else {
+            $logger->error("Failed to quarantine spam email. Rejecting instead.");
+            $this->bounceSpamEmail([], $logger);
+        }
+    }
+
+    /**
+     * Add footer to email if configured
+     */
+    private function addFooterIfConfigured(string $emailData, bool $isSpam = false): string
+    {
+        global $config;
+        $addFooter = $config['postfix']['spam_handling']['add_footer'] ?? false;
+        
+        if (!$addFooter) {
+            return $emailData;
+        }
+        
+        $footerText = $config['postfix']['spam_handling']['footer_text'] ?? '\n\n--- This email has been scanned by Cyford Security Filter ---';
+        
+        if ($isSpam) {
+            $footerText = '\n\n--- WARNING: This email was flagged as spam but allowed through ---';
+        }
+        
+        // Find the end of headers and add footer to body
+        if (preg_match('/(.*?\r?\n\r?\n)(.*)/s', $emailData, $matches)) {
+            $headers = $matches[1];
+            $body = $matches[2];
+            return $headers . $body . $footerText;
+        }
+        
+        return $emailData . $footerText;
+    }
+
+    /**
+     * Create bounce message
+     */
+    private function createBounceMessage(array $headers, string $bounceMessage): string
+    {
+        $from = $headers['From'] ?? 'unknown';
+        $subject = $headers['Subject'] ?? 'No Subject';
+        $messageId = $headers['Message-ID'] ?? uniqid();
+        
+        return <<<EOF
+From: MAILER-DAEMON@{$_SERVER['SERVER_NAME']}
+To: {$from}
+Subject: Mail Delivery Failure - Spam Detected
+In-Reply-To: {$messageId}
+
+{$bounceMessage}
+
+Original Subject: {$subject}
+EOF;
     }
 
     /**

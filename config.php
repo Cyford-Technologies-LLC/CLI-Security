@@ -13,6 +13,13 @@ return [
         'postfix_command' => '/usr/sbin/postfix', // Path to Postfix executable
         'allow_modification' => true, // Set to true to allow automatic configuration changes
         'backup_directory' => '/var/backups/postfix', // Path to store configuration file backups
+        'spam_handling' => [
+            'action' => 'quarantine', // Options: 'reject', 'quarantine', 'allow'
+            'bounce_message' => 'Your message has been rejected due to spam content. Please contact the administrator if you believe this is an error.',
+            'quarantine_folder' => 'Spam', // Folder name to create for spam emails
+            'add_footer' => true, // Add spam filter footer to clean emails
+            'footer_text' => '\n\n--- This email has been scanned by Cyford Security Filter ---',
+        ],
     ],
     'credentials' => [
         'email' => '',  // Account email for login

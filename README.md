@@ -108,31 +108,97 @@ sh cyford-report --ips=192.168.1.1,127.0.0.1 --categories=3,5
 
 ### **Postfix Integration**
 
-To integrate CLI-Security with Postfix for email filtering, perform the following steps:
+CLI-Security provides **automatic Postfix configuration** and **manual setup** options for email security filtering.
 
-1. **Edit the `main.cf` Configuration File**:
+#### **Option 1: Automatic Configuration (Recommended)**
+
+Run the script once to automatically configure Postfix:
+```sh
+cyford-report --input_type=manual
+```
+
+The script will:
+- Detect your server's public IP address
+- Configure IP-based SMTP filtering
+- Create backups of your configuration files
+- Set up spam handling according to your config
+
+#### **Option 2: Manual Configuration**
+
+If you prefer manual setup or need to troubleshoot:
+
+1. **Get your server's public IP address**:
    ```sh
-   sudo nano /etc/postfix/main.cf
-   ```
-   Add the content filter:
-   ```
-   content_filter = security-filter:dummy
+   curl ifconfig.me
    ```
 
 2. **Edit the `master.cf` Configuration File**:
    ```sh
    sudo nano /etc/postfix/master.cf
    ```
-   Add the following filter configuration:
+   
+   Add these entries (replace `YOUR_PUBLIC_IP` with your actual IP):
    ```
+   # External SMTP (with content filter for security)
+   YOUR_PUBLIC_IP:smtp inet  n       -       n       -       -       smtpd
+     -o content_filter=security-filter:dummy
+   
+   # Internal SMTP (no content filter)
+   127.0.0.1:smtp inet  n       -       n       -       -       smtpd
+     -o smtpd_client_restrictions=permit_mynetworks,reject
+     -o content_filter=
+   
+   # Security filter service
    security-filter unix - n n - - pipe
-     flags=Rq user=report-ip argv=/usr/local/bin/cyford-report --ips=${client_address} --categories=3
+     flags=Rq user=report-ip argv=/usr/bin/php /usr/local/share/cyford/security/index.php --input_type=postfix --ips=${client_address} --categories=3
    ```
 
-3. **Restart Postfix**:
+3. **Remove any old global content_filter from main.cf** (if present):
+   ```sh
+   sudo nano /etc/postfix/main.cf
+   ```
+   Remove or comment out this line if it exists:
+   ```
+   # content_filter = security-filter:dummy
+   ```
+
+4. **Restart Postfix**:
    ```sh
    sudo systemctl restart postfix
    ```
+
+#### **Spam Handling Configuration**
+
+Configure spam handling in `/usr/local/share/cyford/security/config.php`:
+
+```php
+'postfix' => [
+    'spam_handling' => [
+        'action' => 'quarantine', // Options: 'reject', 'quarantine', 'allow'
+        'bounce_message' => 'Your message has been rejected due to spam content.',
+        'quarantine_folder' => 'Spam', // Folder name for spam emails
+        'add_footer' => true, // Add footer to clean emails
+        'footer_text' => '\n\n--- Scanned by Cyford Security Filter ---',
+    ],
+],
+```
+
+**Spam Actions:**
+- `reject`: Bounce spam back to sender with custom message
+- `quarantine`: Move spam to user's spam folder (creates folder if needed)
+- `allow`: Let spam through with warning footer
+
+#### **Verification**
+
+Test your configuration:
+1. Send a test email to your server
+2. Check logs: `sudo tail -f /var/log/cyford-security/application.log`
+3. Verify email delivery: `sudo tail -f /var/log/mail.log`
+
+You should see:
+- External emails processed by security filter
+- Clean emails delivered to inbox
+- Spam handled according to your configuration
 
 ### **Firewall Integration**
 
