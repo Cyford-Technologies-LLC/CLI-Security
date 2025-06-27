@@ -1,0 +1,8 @@
+# Blacklist Domains
+# One domain per line, comments start with #
+# Examples:
+# spam-domain.com
+# malicious-site.net
+# phishing-site.org
+
+# Add blocked domains here

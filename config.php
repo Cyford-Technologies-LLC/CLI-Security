@@ -15,10 +15,20 @@ return [
         'backup_directory' => '/var/backups/postfix', // Path to store configuration file backups
         'spam_handling' => [
             'action' => 'quarantine', // Options: 'reject', 'quarantine', 'allow'
-            'bounce_message' => 'Your message has been rejected due to spam content. Please contact the administrator if you believe this is an error.',
+            'bounce_message' => 'Your message has been rejected due to spam content by Cyford Web Armor. Please contact the administrator if you believe this is an error.',
             'quarantine_folder' => 'Spam', // Folder name to create for spam emails
             'add_footer' => true, // Add spam filter footer to clean emails
             'footer_text' => '\n\n--- This email has been scanned by Cyford Web Armor ---',
+        ],
+        'whitelist' => [
+            'ips_file' => '/usr/local/share/cyford/security/lists/whitelist_ips.txt',
+            'domains_file' => '/usr/local/share/cyford/security/lists/whitelist_domains.txt',
+            'emails_file' => '/usr/local/share/cyford/security/lists/whitelist_emails.txt',
+        ],
+        'blacklist' => [
+            'ips_file' => '/usr/local/share/cyford/security/lists/blacklist_ips.txt',
+            'domains_file' => '/usr/local/share/cyford/security/lists/blacklist_domains.txt',
+            'emails_file' => '/usr/local/share/cyford/security/lists/blacklist_emails.txt',
         ],
     ],
     'credentials' => [
@@ -28,7 +38,16 @@ return [
     'log' => [
         'file_path' => '/var/log/cyford-security/application.log',
     ],
-
+    'whitelist' => [
+        'ips_file' => '/usr/local/share/cyford/security/lists/whitelist_ips.txt',
+        'domains_file' => '/usr/local/share/cyford/security/lists/whitelist_domains.txt',
+        'emails_file' => '/usr/local/share/cyford/security/lists/whitelist_emails.txt',
+    ],
+    'blacklist' => [
+        'ips_file' => '/usr/local/share/cyford/security/lists/blacklist_ips.txt',
+        'domains_file' => '/usr/local/share/cyford/security/lists/blacklist_domains.txt',
+        'emails_file' => '/usr/local/share/cyford/security/lists/blacklist_emails.txt',
+    ],
     'errors' => [
         'report_errors' => 1,
         'error_log_location' =>  __DIR__ . '/var/log/cyford-security/errors/error.log',

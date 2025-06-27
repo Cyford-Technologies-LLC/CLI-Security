@@ -1,0 +1,8 @@
+# Blacklist Email Addresses
+# One email per line, comments start with #
+# Examples:
+# spam@malicious.com
+# phishing@bad-domain.net
+# scammer@fake-site.org
+
+# Add blocked email addresses here

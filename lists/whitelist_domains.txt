@@ -1,0 +1,8 @@
+# Whitelist Domains
+# One domain per line, comments start with #
+# Examples:
+# gmail.com
+# outlook.com
+# company.com
+
+# Add trusted domains here

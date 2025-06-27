@@ -1,0 +1,8 @@
+# Whitelist Email Addresses
+# One email per line, comments start with #
+# Examples:
+# admin@company.com
+# support@trusted-domain.com
+# noreply@service.com
+
+# Add trusted email addresses here
