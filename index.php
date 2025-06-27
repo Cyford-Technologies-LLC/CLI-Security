@@ -1,8 +1,6 @@
 <?php
 
 try {
-    // Force reset group membership
-    exec('newgrp postdrop');
     // Load dependencies and configuration
     $bootstrap = require __DIR__ . '/bootstrap.php';
     $cliArgs = $bootstrap['cliArgs'];
@@ -80,7 +78,8 @@ function processEmailFromPostfix($postfix, $spamFilter, $logger): void
     }
 
     // Check if the email has already been processed by the security filter
-    if (!empty($headers['X-Processed-By-Security-Filter'])) {
+    if (isset($headers['X-Processed-By-Security-Filter']) || 
+        strpos($emailData, 'X-Processed-By-Security-Filter:') !== false) {
         $logger->info("Email already processed by the security filter. Skipping further processing.");
         exit(0);
     }
