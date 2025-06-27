@@ -10,14 +10,16 @@ class Postfix
     private string $postfixCommand;
     private string $backupDirectory;
     private bool $allowFileModification;
+    private Systems $systems;
 
-    public function __construct(array $config)
+    public function __construct(array $config, Systems $systems = null)
     {
         $this->mainConfigPath = $config['postfix']['main_config'] ?? '/etc/postfix/main.cf';
         $this->masterConfigPath = $config['postfix']['master_config'] ?? '/etc/postfix/master.cf';
         $this->postfixCommand = $config['postfix']['postfix_command'] ?? '/usr/sbin/postfix';
         $this->backupDirectory = $config['postfix']['backup_directory'] ?? '/var/backups/postfix';
         $this->allowFileModification = $config['postfix']['allow_modification'] ?? false;
+        $this->systems = $systems ?? new Systems();
 
         // Ensure Postfix command exists
         if (!file_exists($this->postfixCommand)) {
@@ -26,7 +28,9 @@ class Postfix
 
         // Ensure the backup directory exists
         if (!is_dir($this->backupDirectory)) {
-            mkdir($this->backupDirectory, 0755, true);
+            if (!mkdir($concurrentDirectory = $this->backupDirectory, 0755, true) && !is_dir($concurrentDirectory)) {
+                throw new \RuntimeException(sprintf('Directory "%s" was not created', $concurrentDirectory));
+            }
         }
     }
 
@@ -37,23 +41,27 @@ class Postfix
      */
     public function checkConfig(): bool
     {
-        $mainConfig = file_exists($this->mainConfigPath) ? file_get_contents($this->mainConfigPath) : '';
         $masterConfig = file_exists($this->masterConfigPath) ? file_get_contents($this->masterConfigPath) : '';
 
-        $mainConfigCheck = strpos($mainConfig, 'content_filter = security-filter:dummy') !== false;
-        $masterConfigCheck = strpos($masterConfig, 'security-filter unix - n n - - pipe') !== false;
+        // Check for IP-based SMTP configuration
+        $externalSmtpCheck = preg_match('/\d+\.\d+\.\d+\.\d+:smtp\s+inet.*content_filter=security-filter:dummy/', $masterConfig);
+        $localhostSmtpCheck = strpos($masterConfig, '127.0.0.1:smtp inet') !== false;
+        $securityFilterCheck = strpos($masterConfig, 'security-filter unix - n n - - pipe') !== false;
 
-        if ($mainConfigCheck && $masterConfigCheck) {
+        if ($externalSmtpCheck && $localhostSmtpCheck && $securityFilterCheck) {
             echo "Cyford WEB ARMOR (for PostFix) INITIATED!.\n";
             return true;
         }
 
         echo "Missing Postfix configurations:\n";
-        if (!$mainConfigCheck) {
-            echo " - 'content_filter' is missing in {$this->mainConfigPath}.\n";
+        if (!$externalSmtpCheck) {
+            echo " - External IP SMTP with content_filter is missing in {$this->masterConfigPath}.\n";
         }
-        if (!$masterConfigCheck) {
-            echo " - 'security-filter' is missing in {$this->masterConfigPath}.\n";
+        if (!$localhostSmtpCheck) {
+            echo " - Localhost SMTP service is missing in {$this->masterConfigPath}.\n";
+        }
+        if (!$securityFilterCheck) {
+            echo " - 'security-filter' service is missing in {$this->masterConfigPath}.\n";
         }
 
         return false;
@@ -66,46 +74,163 @@ class Postfix
      */
     public function autoConfig(): void
     {
-        echo "INFO: Checking and configuring Postfix...\n";
+        echo "INFO: Checking and configuring Postfix for IP-based filtering...\n";
 
-        // Check main.cf
+        // Get server's public IP
+        $publicIP = $this->systems->getPublicIP();
+        if (!$publicIP) {
+            echo "ERROR: Could not determine server's public IP address.\n";
+            return;
+        }
+        echo "INFO: Detected public IP: {$publicIP}\n";
+
+        // Remove old global content_filter from main.cf if it exists
         if (file_exists($this->mainConfigPath)) {
             $mainConfigContent = file_get_contents($this->mainConfigPath);
-            echo "INFO: Scanning '{$this->mainConfigPath}'...\n";
-            if (strpos($mainConfigContent, 'content_filter = security-filter:dummy') === false) {
-                echo "INFO: 'content_filter' is missing in {$this->mainConfigPath}, attempting to add it...\n";
-                $this->backupFile($this->mainConfigPath); // Ensure backup is triggered
-                file_put_contents($this->mainConfigPath, "\ncontent_filter = security-filter:dummy\n", FILE_APPEND);
-                echo "SUCCESS: 'content_filter' added to {$this->mainConfigPath}.\n";
-            } else {
-                echo "INFO: 'content_filter' already exists in {$this->mainConfigPath}.\n";
+            if (strpos($mainConfigContent, 'content_filter = security-filter:dummy') !== false) {
+                echo "INFO: Removing old global content_filter from {$this->mainConfigPath}...\n";
+                $this->backupFile($this->mainConfigPath);
+                $mainConfigContent = str_replace("content_filter = security-filter:dummy\n", "", $mainConfigContent);
+                $mainConfigContent = str_replace("#content_filter = security-filter:dummy\n", "", $mainConfigContent);
+                file_put_contents($this->mainConfigPath, $mainConfigContent);
+                echo "SUCCESS: Old content_filter removed.\n";
             }
-        } else {
-            echo "ERROR: {$this->mainConfigPath} does not exist.\n";
         }
 
-        // Check master.cf
+        // Configure master.cf with IP-based filtering
         if (file_exists($this->masterConfigPath)) {
             $masterConfigContent = file_get_contents($this->masterConfigPath);
-            echo "INFO: Scanning '{$this->masterConfigPath}'...\n";
-            if (strpos($masterConfigContent, 'security-filter unix - n n - - pipe') === false) {
-                echo "INFO: 'security-filter' is missing in {$this->masterConfigPath}, attempting to add it...\n";
-                $this->backupFile($this->masterConfigPath); // Ensure backup is triggered
-                file_put_contents(
-                    $this->masterConfigPath,
-                    "\nsecurity-filter unix - n n - - pipe\n  flags=Rq user=report-ip argv=/usr/bin/php /usr/local/share/cyford/security/index.php --input_type=postfix --ips={\$client_address} --categories=3\n",
-                    FILE_APPEND
-                );
-                echo "SUCCESS: 'security-filter' added to {$this->masterConfigPath}.\n";
-            } else {
-                echo "INFO: 'security-filter' already exists in {$this->masterConfigPath}.\n";
-            }
+            echo "INFO: Configuring IP-based SMTP services in {$this->masterConfigPath}...\n";
+            
+            $this->backupFile($this->masterConfigPath);
+            
+            // Remove old entries and add new IP-based entries
+            $masterConfigContent = $this->removeOldEntries($masterConfigContent);
+            $newEntries = $this->generateIPBasedEntries($publicIP);
+            $masterConfigContent .= "\n" . $newEntries;
+            file_put_contents($this->masterConfigPath, $masterConfigContent);
+            
+            echo "SUCCESS: IP-based SMTP configuration applied.\n";
+            echo "INFO: External SMTP ({$publicIP}:25) - WITH security filter\n";
+            echo "INFO: Internal SMTP (127.0.0.1:25) - WITHOUT security filter\n";
         } else {
             echo "ERROR: {$this->masterConfigPath} does not exist.\n";
         }
 
         // Reload Postfix
         $this->reload();
+    }
+    
+
+    
+    /**
+     * Generate IP-based master.cf configuration.
+     *
+     * @param string $publicIP
+     * @return string
+     */
+    private function generateIPBasedMasterConfig(string $publicIP): string
+    {
+        return <<<EOF
+# Postfix master process configuration file.
+#
+# ==========================================================================
+# service type  private unpriv  chroot  wakeup  maxproc command + args
+#               (yes)   (yes)   (yes)   (never) (100)
+# ==========================================================================
+
+# External SMTP (with content filter for security)
+{$publicIP}:smtp inet  n       -       n       -       -       smtpd
+  -o content_filter=security-filter:dummy
+
+# Internal SMTP (no content filter)
+127.0.0.1:smtp inet  n       -       n       -       -       smtpd
+  -o smtpd_client_restrictions=permit_mynetworks,reject
+  -o content_filter=
+
+# Security filter service
+security-filter unix - n n - - pipe
+  flags=Rq user=report-ip argv=/usr/bin/php /usr/local/share/cyford/security/index.php --input_type=postfix --ips=\${{client_address}} --categories=3
+
+# Standard services
+pickup    unix  n       -       y       60      1       pickup
+cleanup   unix  n       -       y       -       0       cleanup
+qmgr      unix  n       -       n       300     1       qmgr
+tlsmgr    unix  -       -       y       1000?   1       tlsmgr
+rewrite   unix  -       -       y       -       -       trivial-rewrite
+bounce    unix  -       -       y       -       0       bounce
+defer     unix  -       -       y       -       0       bounce
+trace     unix  -       -       y       -       0       bounce
+verify    unix  -       -       y       -       1       verify
+flush     unix  n       -       y       1000?   0       flush
+proxymap  unix  -       -       n       -       -       proxymap
+proxywrite unix -       -       n       -       1       proxymap
+smtp      unix  -       -       y       -       -       smtp
+relay     unix  -       -       y       -       -       smtp
+showq     unix  n       -       y       -       -       showq
+error     unix  -       -       y       -       -       error
+retry     unix  -       -       y       -       -       error
+discard   unix  -       -       y       -       -       discard
+local     unix  -       n       n       -       -       local
+virtual   unix  -       n       n       -       -       virtual
+lmtp      unix  -       -       y       -       -       lmtp
+anvil     unix  -       -       y       -       1       anvil
+scache    unix  -       -       y       -       1       scache
+postlog   unix-dgram n  -       n       -       1       postlogd
+EOF;
+    }
+    
+    /**
+     * Remove old security-related entries from master.cf
+     *
+     * @param string $content
+     * @return string
+     */
+    private function removeOldEntries(string $content): string
+    {
+        // Remove old generic smtp entry with content_filter
+        $content = preg_replace('/^smtp\s+inet.*content_filter=security-filter:dummy.*$/m', '', $content);
+        
+        // Remove old security-filter entry
+        $content = preg_replace('/^security-filter\s+unix.*$/m', '', $content);
+        $content = preg_replace('/^\s+flags=Rq.*security.*$/m', '', $content);
+        
+        // Remove any existing IP-based entries to avoid duplicates
+        $content = preg_replace('/^\d+\.\d+\.\d+\.\d+:smtp\s+inet.*$/m', '', $content);
+        $content = preg_replace('/^127\.0\.0\.1:smtp\s+inet.*$/m', '', $content);
+        $content = preg_replace('/^\s+-o\s+content_filter=security-filter:dummy.*$/m', '', $content);
+        $content = preg_replace('/^\s+-o\s+content_filter=\s*$/m', '', $content);
+        $content = preg_replace('/^\s+-o\s+smtpd_client_restrictions=permit_mynetworks,reject.*$/m', '', $content);
+        
+        // Clean up extra blank lines
+        $content = preg_replace('/\n\s*\n\s*\n/', "\n\n", $content);
+        
+        return $content;
+    }
+    
+    /**
+     * Generate only the IP-based entries to add to master.cf
+     *
+     * @param string $publicIP
+     * @return string
+     */
+    private function generateIPBasedEntries(string $publicIP): string
+    {
+        return <<<EOF
+# Cyford Security Filter Configuration
+# External SMTP (with content filter for security)
+{$publicIP}:smtp inet  n       -       n       -       -       smtpd
+  -o content_filter=security-filter:dummy
+
+# Internal SMTP (no content filter)
+127.0.0.1:smtp inet  n       -       n       -       -       smtpd
+  -o smtpd_client_restrictions=permit_mynetworks,reject
+  -o content_filter=
+
+# Security filter service
+security-filter unix - n n - - pipe
+  flags=Rq user=report-ip argv=/usr/bin/php /usr/local/share/cyford/security/index.php --input_type=postfix --ips=\${{client_address}} --categories=3
+EOF;
     }
     /**
      * Create a timestamped backup of a file before modifying it.
@@ -134,6 +259,349 @@ class Postfix
         echo "Backup created: {$backupFile}\n";
     }
     /**
+     * Process email from Postfix content filter
+     *
+     * @param object $spamFilter
+     * @param object $logger
+     * @return void
+     */
+    public function processEmail($spamFilter, $logger): void
+    {
+        $logger->info("Processing email received from Postfix...");
+
+        // Read email data from stdin
+        $emailData = file_get_contents('php://stdin');
+        if (!$emailData) {
+            throw new RuntimeException("No email data received from Postfix.");
+        }
+        $logger->info("Raw email data successfully read.");
+
+        // Parse headers and body
+        list($headers, $body) = $this->parseEmail($emailData);
+        $logger->info("Parsed headers: " . json_encode($headers));
+
+        // Skip system/security emails to prevent loops
+        if ($this->shouldSkipEmail($headers, $logger)) {
+            exit(0);
+        }
+
+        // Check if already processed
+        if ($this->isAlreadyProcessed($headers, $emailData, $logger)) {
+            return;
+        }
+
+        // Detect spam
+        $isSpam = $spamFilter->isSpam($headers, $body);
+        if ($isSpam) {
+            $logger->warning("Email flagged as spam. Processing terminated.");
+            exit(0);
+        }
+
+        $logger->info("Email is clean of spam. Proceeding with requeue.");
+
+        // Extract recipient and requeue
+        $recipient = $this->extractEmailAddress($headers['To'] ?? '');
+        if (empty($recipient)) {
+            $logger->error("Recipient not found or invalid in email headers.");
+            throw new RuntimeException("Recipient not found or invalid in email headers.");
+        }
+        $logger->info("Recipient resolved: {$recipient}");
+
+        $this->requeueEmail($emailData, $recipient, $logger);
+    }
+
+    /**
+     * Check if email should be skipped
+     */
+    private function shouldSkipEmail(array $headers, $logger): bool
+    {
+        $from = $headers['From'] ?? '';
+        $subject = $headers['Subject'] ?? '';
+
+        if (strpos($from, 'report-ip@') !== false ||
+            strpos($subject, '*** SECURITY information') !== false ||
+            strpos($headers['Auto-Submitted'] ?? '', 'auto-generated') !== false) {
+            $logger->info("Skipping system/security email to prevent processing loop");
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Check if email is already processed
+     */
+    private function isAlreadyProcessed(array $headers, string $emailData, $logger): bool
+    {
+        $hasSecurityHeader = isset($headers['X-Processed-By-Security-Filter']);
+        $hasSecurityHeaderInRaw = strpos($emailData, 'X-Processed-By-Security-Filter:') !== false;
+        
+        $logger->info("Security header check - In parsed headers: " . ($hasSecurityHeader ? 'YES' : 'NO') . 
+                      ", In raw data: " . ($hasSecurityHeaderInRaw ? 'YES' : 'NO'));
+        
+        if ($hasSecurityHeader || $hasSecurityHeaderInRaw) {
+            $logger->info("Email already processed by the security filter. Allowing normal delivery.");
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Parse email into headers and body
+     */
+    private function parseEmail(string $emailData): array
+    {
+        [$headersRaw, $body] = preg_split("/\R\R/", $emailData, 2);
+
+        $headers = [];
+        $lines = explode("\n", $headersRaw);
+        $currentHeader = '';
+
+        foreach ($lines as $line) {
+            if (preg_match("/^([\w-]+):\s*(.*)$/", $line, $matches)) {
+                $currentHeader = $matches[1];
+                $headers[$currentHeader] = $matches[2];
+            } elseif (!empty($currentHeader)) {
+                $headers[$currentHeader] .= ' ' . trim($line);
+            }
+        }
+
+        return [$headers, $body];
+    }
+
+    /**
+     * Extract email address from header
+     */
+    private function extractEmailAddress(string $toHeader): string
+    {
+        if (preg_match('/<([^>]+)>/', $toHeader, $matches)) {
+            return $matches[1];
+        }
+
+        if (filter_var($toHeader, FILTER_VALIDATE_EMAIL)) {
+            return $toHeader;
+        }
+
+        return '';
+    }
+
+    /**
+     * Requeue email back to Postfix
+     */
+    private function requeueEmail(string $emailData, string $recipient, $logger): void
+    {
+        global $config;
+        $requeueMethod = $config['postfix']['requeue_method'] ?? 'postdrop';
+
+        if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+            $message = "Invalid recipient email after extraction: {$recipient}";
+            $logger->error($message);
+            throw new InvalidArgumentException($message);
+        }
+
+        // Add custom header to prevent reprocessing
+        if (!preg_match('/^X-Processed-By-Security-Filter:/m', $emailData)) {
+            $logger->info("Adding 'X-Processed-By-Security-Filter' header to prevent reprocessing.");
+            $emailData = "X-Processed-By-Security-Filter: true\r\n" . $emailData;
+        }
+
+        $logger->info("Requeueing email using method: {$requeueMethod} for recipient: {$recipient}");
+
+        switch ($requeueMethod) {
+            case 'sendmail':
+                $this->requeueWithSendmail($emailData, $recipient, $logger);
+                break;
+            case 'postdrop':
+                $this->requeueWithPostdrop($emailData, $logger);
+                break;
+            case 'postpickup':
+                $this->requeueWithPostpickup($emailData, $logger);
+                break;
+            case 'smtp':
+                $this->requeueWithSMTP($emailData, $recipient, $logger);
+                break;
+            default:
+                $error = "Unknown requeue method: {$requeueMethod}";
+                $logger->error($error);
+                throw new RuntimeException($error);
+        }
+    }
+
+    /**
+     * Requeue with sendmail
+     */
+    private function requeueWithSendmail(string $emailData, string $recipient, $logger): void
+    {
+        $sendmailPath = '/usr/sbin/sendmail';
+        $requeueCommand = "{$sendmailPath} -i -- {$recipient}";
+        $logger->info("Executing sendmail command: {$requeueCommand}");
+
+        $process = proc_open($requeueCommand, [
+            ['pipe', 'r'],
+            ['pipe', 'w'],
+            ['pipe', 'w'],
+        ], $pipes);
+
+        if (is_resource($process)) {
+            fwrite($pipes[0], $emailData);
+            fclose($pipes[0]);
+
+            $output = stream_get_contents($pipes[1]);
+            $errors = stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+
+            $returnCode = proc_close($process);
+
+            if ($returnCode !== 0) {
+                throw new RuntimeException("sendmail failed. Exit code: {$returnCode}. Errors: {$errors}");
+            }
+
+            $logger->info("Email successfully requeued with sendmail");
+        } else {
+            throw new RuntimeException("Failed to open process for sendmail execution");
+        }
+    }
+
+    /**
+     * Requeue with SMTP
+     */
+    private function requeueWithSMTP(string $emailData, string $recipient, $logger): void
+    {
+        $smtpHost = '127.0.0.1';
+        $smtpPort = 25;
+        
+        $logger->info("Connecting to SMTP server at {$smtpHost}:{$smtpPort}");
+        
+        $socket = fsockopen($smtpHost, $smtpPort, $errno, $errstr, 30);
+        if (!$socket) {
+            throw new RuntimeException("Failed to connect to SMTP server: {$errstr} ({$errno})");
+        }
+        
+        try {
+            // Read greeting
+            $response = fgets($socket);
+            if (substr($response, 0, 3) !== '220') {
+                throw new RuntimeException("SMTP server error: {$response}");
+            }
+            
+            // HELO
+            fwrite($socket, "HELO localhost\r\n");
+            $response = fgets($socket);
+            if (substr($response, 0, 3) !== '250') {
+                throw new RuntimeException("HELO failed: {$response}");
+            }
+            
+            // MAIL FROM
+            fwrite($socket, "MAIL FROM:<>\r\n");
+            $response = fgets($socket);
+            if (substr($response, 0, 3) !== '250') {
+                throw new RuntimeException("MAIL FROM failed: {$response}");
+            }
+            
+            // RCPT TO
+            fwrite($socket, "RCPT TO:<{$recipient}>\r\n");
+            $response = fgets($socket);
+            if (substr($response, 0, 3) !== '250') {
+                throw new RuntimeException("RCPT TO failed: {$response}");
+            }
+            
+            // DATA
+            fwrite($socket, "DATA\r\n");
+            $response = fgets($socket);
+            if (substr($response, 0, 3) !== '354') {
+                throw new RuntimeException("DATA failed: {$response}");
+            }
+            
+            // Send email data
+            fwrite($socket, $emailData);
+            if (substr($emailData, -2) !== "\r\n") {
+                fwrite($socket, "\r\n");
+            }
+            fwrite($socket, ".\r\n");
+            
+            $response = fgets($socket);
+            if (substr($response, 0, 3) !== '250') {
+                throw new RuntimeException("Email delivery failed: {$response}");
+            }
+            
+            // QUIT
+            fwrite($socket, "QUIT\r\n");
+            fgets($socket);
+            
+            $logger->info("Email requeued via SMTP");
+            
+        } finally {
+            fclose($socket);
+        }
+    }
+
+    /**
+     * Requeue with postdrop
+     */
+    private function requeueWithPostdrop(string $emailData, $logger): void
+    {
+        $logger->info("Delivering email via postdrop...");
+        
+        $tempFile = tempnam('/tmp', 'postdrop_');
+        
+        try {
+            if (file_put_contents($tempFile, $emailData) === false) {
+                throw new RuntimeException("Failed to write temporary file");
+            }
+            
+            $command = "postdrop < {$tempFile}";
+            $result = shell_exec($command . ' 2>&1');
+            
+            if ($result !== null && trim($result) !== '') {
+                throw new RuntimeException("Postdrop failed: {$result}");
+            }
+            
+            $logger->info("Email successfully queued via postdrop");
+            
+        } finally {
+            if (file_exists($tempFile)) {
+                unlink($tempFile);
+            }
+        }
+    }
+
+    /**
+     * Requeue with postpickup
+     */
+    private function requeueWithPostpickup(string $emailData, $logger): void
+    {
+        $logger->info("Delivering email via pickup directory...");
+        
+        $pickupDir = '/var/spool/postfix/pickup';
+        $queueId = uniqid('sec_', true);
+        $tempFile = "/tmp/{$queueId}";
+        $finalFile = "{$pickupDir}/{$queueId}";
+        
+        try {
+            if (file_put_contents($tempFile, $emailData) === false) {
+                throw new RuntimeException("Failed to write temporary file");
+            }
+            
+            $moveCmd = "sudo mv {$tempFile} {$finalFile}";
+            exec($moveCmd, $output, $returnCode);
+            
+            if ($returnCode !== 0) {
+                throw new RuntimeException("Move failed with return code: {$returnCode}");
+            }
+            
+            exec("sudo chown postfix:postdrop {$finalFile}");
+            exec("sudo chmod 644 {$finalFile}");
+            
+            $logger->info("Email successfully queued via pickup directory: {$queueId}");
+            
+        } finally {
+            if (file_exists($tempFile)) {
+                unlink($tempFile);
+            }
+        }
+    }
+
+    /**
      * Reload Postfix service.
      *
      * @return void
@@ -141,6 +609,44 @@ class Postfix
     public function reload(): void
     {
         echo "Reloading Postfix configuration...\n";
+
+        $output = shell_exec("sudo {$this->postfixCommand} reload 2>&1");
+
+        if (empty($output)) {
+            throw new RuntimeException("Failed to reload Postfix. Ensure the Postfix service is running.");
+        }
+
+        echo "Postfix reload output: {$output}\n";
+    }
+
+    function parseHeaders($rawHeaders)
+    {
+        $headers = [];
+        $lines = explode("\n", $rawHeaders);
+        foreach ($lines as $line) {
+            if (strpos($line, ':') !== false) {
+                list($key, $value) = explode(':', $line, 2);
+                $headers[trim($key)] = trim($value);
+            }
+        }
+        return $headers;
+    }
+    /**
+     * Get Postfix service status.
+     *
+     * @return string Postfix status output.
+     */
+    public function getStatus(): string
+    {
+        $command = "systemctl status postfix";
+        $output = shell_exec($command);
+
+        if (!$output) {
+            throw new RuntimeException('Failed to retrieve Postfix status.');
+        }
+
+        return $output;
+    }onfiguration...\n";
 
         $output = shell_exec("sudo {$this->postfixCommand} reload 2>&1");
 

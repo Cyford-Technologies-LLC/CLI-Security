@@ -116,6 +116,31 @@ class Systems
     }
 
     /**
+     * Get server's public IP address.
+     *
+     * @return string|null
+     */
+    public function getPublicIP(): ?string
+    {
+        // Try multiple methods to get public IP
+        $methods = [
+            'curl -s ifconfig.me',
+            'curl -s ipinfo.io/ip',
+            'curl -s icanhazip.com',
+            'hostname -I | awk "{print \$1}"'
+        ];
+        
+        foreach ($methods as $method) {
+            $ip = trim(shell_exec($method));
+            if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE)) {
+                return $ip;
+            }
+        }
+        
+        return null;
+    }
+
+    /**
      * Format bytes into a readable size.
      *
      * @param int $bytes
