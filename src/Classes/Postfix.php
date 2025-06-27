@@ -12,7 +12,7 @@ class Postfix
     private bool $allowFileModification;
     private Systems $systems;
 
-    public function __construct(array $config, Systems $systems = null)
+    public function __construct(array $config, ?Systems $systems = null)
     {
         $this->mainConfigPath = $config['postfix']['main_config'] ?? '/etc/postfix/main.cf';
         $this->masterConfigPath = $config['postfix']['master_config'] ?? '/etc/postfix/master.cf';
@@ -28,7 +28,13 @@ class Postfix
 
         // Ensure the backup directory exists
         if (!is_dir($this->backupDirectory)) {
-            mkdir($this->backupDirectory, 0755, true);
+            if (!mkdir($this->backupDirectory, 0755, true)) {
+                // Fallback to /tmp if can't create in /var/backups
+                $this->backupDirectory = '/tmp/postfix_backups';
+                if (!is_dir($this->backupDirectory)) {
+                    mkdir($this->backupDirectory, 0755, true);
+                }
+            }
         }
     }
 
@@ -121,6 +127,9 @@ class Postfix
     public function processEmail($spamFilter, $logger): void
     {
         $logger->info("Processing email received from Postfix...");
+        
+        // Skip configuration check during email processing
+        // This prevents autoConfig from running during email processing
 
         // Read email data from stdin
         $emailData = file_get_contents('php://stdin');
@@ -510,16 +519,26 @@ EOF;
         $backupDir = $this->backupDirectory;
         $backupFile = "{$backupDir}/" . basename($filePath) . ".backup_{$timestamp}";
 
-        // Ensure backup directory exists
+        // Ensure backup directory exists and is writable
         if (!is_dir($backupDir)) {
-            if (!mkdir($backupDir, 0755, true) && !is_dir($backupDir)) {
-                throw new RuntimeException("Failed to create backup directory: {$backupDir}");
+            if (!mkdir($backupDir, 0755, true)) {
+                // Try /tmp as fallback
+                $backupDir = '/tmp';
+                $backupFile = "{$backupDir}/" . basename($filePath) . ".backup_{$timestamp}";
             }
+        }
+
+        // Check if directory is writable
+        if (!is_writable($backupDir)) {
+            echo "WARNING: Cannot write to {$backupDir}, using /tmp for backup\n";
+            $backupDir = '/tmp';
+            $backupFile = "{$backupDir}/" . basename($filePath) . ".backup_{$timestamp}";
         }
 
         // Create the backup
         if (!copy($filePath, $backupFile)) {
-            throw new RuntimeException("Failed to create backup for: {$filePath}");
+            echo "WARNING: Failed to create backup for: {$filePath}. Continuing without backup.\n";
+            return;
         }
 
         echo "Backup created: {$backupFile}\n";

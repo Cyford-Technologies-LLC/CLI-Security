@@ -85,23 +85,28 @@ if ($inputType === 'postfix') {
     $postfix = initializeService('Postfix', static fn() => new Postfix($config), $logger);
 
     if ($postfix) {
-        // Set up Postfix-specific configurations and spam filter
-        $logger->info('Postfix is installed. Checking configuration...');
-
-        if ($postfix->checkConfig()) {
-            $logger->info('Postfix configuration verified.');
-        } else {
-            $logger->warning('Postfix configuration is incomplete, attempting to fix...');
-            $postfix->autoConfig();
+        // Only check config if not processing email (to avoid autoConfig during email processing)
+        $isEmailProcessing = isset($argv) && in_array('--input_type=postfix', $argv);
+        
+        if (!$isEmailProcessing) {
+            // Set up Postfix-specific configurations during setup/manual runs
+            $logger->info('Postfix is installed. Checking configuration...');
 
             if ($postfix->checkConfig()) {
-                $logger->info('Postfix has been successfully configured.');
+                $logger->info('Postfix configuration verified.');
             } else {
-                throw new RuntimeException('Postfix configuration failed. Please check logs for details.');
+                $logger->warning('Postfix configuration is incomplete, attempting to fix...');
+                $postfix->autoConfig();
+
+                if ($postfix->checkConfig()) {
+                    $logger->info('Postfix has been successfully configured.');
+                } else {
+                    throw new RuntimeException('Postfix configuration failed. Please check logs for details.');
+                }
             }
         }
+        
         $spamFilter = initializeService('SpamFilter', static fn() => new SpamFilter($config), $logger);
-
     }
 }
 
