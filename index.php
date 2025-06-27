@@ -85,15 +85,6 @@ function processEmailFromPostfix($postfix, $spamFilter, $logger): void
         exit(0);
     }
 
-
-
-
-    // Check if the email has already been processed by the security filter
-    if (!empty($headers['X-Processed-By-Security-Filter'])) {
-        $logger->info("Email already processed by the security filter. Skipping further processing.");
-        exit(0); // Stop further processing
-    }
-
     // Detect spam using SpamFilter
     $isSpam = $spamFilter->isSpam($headers, $body);
     if ($isSpam) {
