@@ -6,3 +6,4 @@
 # phishing-site.org
 
 # Add blocked domains here
+ademyforinternetresearch.org

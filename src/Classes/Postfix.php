@@ -164,29 +164,20 @@ class Postfix
         $isSpam = false;
         $spamReason = '';
         
-        // Check hash-based detection first (if enabled)
+        // Temporarily disable database functionality due to permissions issues
         global $config;
         $database = null;
         $skipSpamFilter = false;
         
-        if ($config['postfix']['spam_handling']['hash_detection'] ?? false) {
-            $database = new \Cyford\Security\Classes\Database($config);
-            
-            // Check if this hash is known spam
-            if ($database->isKnownSpamHash($subject, $body)) {
-                $isSpam = true;
-                $spamReason = 'Known spam pattern (hash match)';
-                $skipSpamFilter = true;
-                $logger->info("Email flagged as spam by hash detection.");
-            }
-            // Check if this hash is known clean
-            elseif ($database->isKnownCleanHash($subject, $body)) {
-                $isSpam = false;
-                $spamReason = 'Known clean pattern (hash match)';
-                $skipSpamFilter = true;
-                $logger->info("Email marked as clean by hash detection - skipping spam filter.");
-            }
-        }
+        // TODO: Re-enable hash detection once permissions are fixed
+        // if ($config['postfix']['spam_handling']['hash_detection'] ?? false) {
+        //     try {
+        //         $database = new \Cyford\Security\Classes\Database($config);
+        //         // Hash detection code here...
+        //     } catch (Exception $e) {
+        //         $logger->warning("Database unavailable, skipping hash detection: " . $e->getMessage());
+        //     }
+        // }
         
         // If not caught by hash, check with spam filter
         if (!$skipSpamFilter) {
@@ -195,11 +186,11 @@ class Postfix
                 $spamReason = $spamFilter->getLastSpamReason() ?? 'Spam filter detection';
             }
             
-            // Record new hash pattern (spam or clean) for future reference
-            if ($database) {
-                $database->recordEmailHash($subject, $body, $isSpam);
-                $logger->info("Email hash recorded as " . ($isSpam ? 'spam' : 'clean') . " for future detection");
-            }
+            // TODO: Re-enable hash recording once database permissions are fixed
+            // if ($database) {
+            //     $database->recordEmailHash($subject, $body, $isSpam);
+            //     $logger->info("Email hash recorded as " . ($isSpam ? 'spam' : 'clean') . " for future detection");
+            // }
         }
 
         if ($isSpam) {
