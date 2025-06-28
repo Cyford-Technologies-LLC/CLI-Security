@@ -27,6 +27,19 @@ try {
             // Handle manual input type
             $logger->info("Processing manual input...");
             break;
+            
+        case 'internal':
+            // Handle internal commands
+            $config = require __DIR__ . '/config.php';
+            $internal = new \Cyford\Security\Classes\Internal($config, $logger);
+            $args = [];
+            if ($cliArgs->has('command')) $args['command'] = $cliArgs->get('command');
+            if ($cliArgs->has('limit')) $args['limit'] = (int)$cliArgs->get('limit');
+            if ($cliArgs->has('pattern_id')) $args['pattern_id'] = (int)$cliArgs->get('pattern_id');
+            if ($cliArgs->has('subject')) $args['subject'] = $cliArgs->get('subject');
+            if ($cliArgs->has('body')) $args['body'] = $cliArgs->get('body');
+            $internal->processCommand($args);
+            break;
 
         default:
             throw new RuntimeException("Unknown input type: {$inputType}");

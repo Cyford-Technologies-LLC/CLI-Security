@@ -245,6 +245,75 @@ php 'errors' => [ 'report_errors' => 1, ],
 
 ---
 
+## **Internal Commands**
+
+CLI-Security includes built-in management commands for database setup, monitoring, and maintenance.
+
+### **Database Setup (Required)**
+
+Before using hash-based spam detection, initialize the database:
+```bash
+php /usr/local/share/cyford/security/index.php --input_type=internal --command=setup-database
+```
+
+### **Available Commands**
+
+#### **Database Management:**
+```bash
+# Setup database with proper permissions
+php index.php --input_type=internal --command=setup-database
+
+# Test database connectivity
+php index.php --input_type=internal --command=test-database
+```
+
+#### **Spam Pattern Management:**
+```bash
+# View spam patterns (limit results)
+php index.php --input_type=internal --command=view-spam-patterns --limit=20
+
+# Remove specific spam pattern
+php index.php --input_type=internal --command=clear-spam-pattern --pattern_id=123
+```
+
+#### **System Monitoring:**
+```bash
+# Show system statistics
+php index.php --input_type=internal --command=stats
+
+# Reload whitelist/blacklist files
+php index.php --input_type=internal --command=reload-lists
+```
+
+#### **Testing Tools:**
+```bash
+# Test spam filter with sample content
+php index.php --input_type=internal --command=test-spam-filter --subject="Hello" --body="Test message"
+
+# Show all available commands
+php index.php --input_type=internal --command=help
+```
+
+### **Hash-Based Spam Detection**
+
+The system includes advanced hash-based spam detection that:
+- **Learns spam patterns** automatically
+- **Blocks duplicate spam** instantly
+- **Improves performance** over time
+- **Persists across reboots**
+
+**Enable in config.php:**
+```php
+'spam_handling' => [
+    'hash_detection' => true,
+    'hash_threshold' => 3, // Block after X identical emails
+],
+```
+
+**Note:** Run `setup-database` command first to initialize the SQLite database with proper permissions.
+
+---
+
 ## **Contributing**
 
 We welcome contributions to improve the script or add new features. You can:
