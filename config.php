@@ -39,6 +39,8 @@ return [
             'add_footer' => true, // Add spam filter footer to clean emails
             'footer_text' => '\n\n--- This email has been scanned by Cyford Web Armor ---',
             'spam_log_file' => '/var/log/cyford-security/spam.log', // Detailed spam log with raw emails
+            'hash_detection' => true, // Enable hash-based duplicate spam detection
+            'hash_threshold' => 3, // Block after X identical emails
         ],
         'whitelist' => [
             'ips_file' => '/usr/local/share/cyford/security/lists/whitelist_ips.txt',
@@ -52,6 +54,11 @@ return [
         ],
     ],
 
+    'database' => [
+        'type' => 'sqlite', // Portable database, no installation required
+        'path' => '/usr/local/share/cyford/security/data/security.db', // SQLite database file
+        'cache_ttl' => 300, // Cache time-to-live in seconds (5 minutes)
+    ],
     'log' => [
         'file_path' => '/var/log/cyford-security/application.log',
     ],

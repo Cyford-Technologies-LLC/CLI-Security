@@ -152,20 +152,60 @@ class Postfix
             return;
         }
 
-        // Detect spam
-        $isSpam = $spamFilter->isSpam($headers, $body);
+        // Get recipient first
         $recipient = $this->extractEmailAddress($headers['To'] ?? '');
         if (empty($recipient)) {
             $logger->error("Recipient not found or invalid in email headers.");
             throw new RuntimeException("Recipient not found or invalid in email headers.");
         }
         $logger->info("Recipient resolved: {$recipient}");
+        
+        $subject = $headers['Subject'] ?? '';
+        $isSpam = false;
+        $spamReason = '';
+        
+        // Check hash-based detection first (if enabled)
+        global $config;
+        $database = null;
+        $skipSpamFilter = false;
+        
+        if ($config['postfix']['spam_handling']['hash_detection'] ?? false) {
+            $database = new \Cyford\Security\Classes\Database($config);
+            
+            // Check if this hash is known spam
+            if ($database->isKnownSpamHash($subject, $body)) {
+                $isSpam = true;
+                $spamReason = 'Known spam pattern (hash match)';
+                $skipSpamFilter = true;
+                $logger->info("Email flagged as spam by hash detection.");
+            }
+            // Check if this hash is known clean
+            elseif ($database->isKnownCleanHash($subject, $body)) {
+                $isSpam = false;
+                $spamReason = 'Known clean pattern (hash match)';
+                $skipSpamFilter = true;
+                $logger->info("Email marked as clean by hash detection - skipping spam filter.");
+            }
+        }
+        
+        // If not caught by hash, check with spam filter
+        if (!$skipSpamFilter) {
+            $isSpam = $spamFilter->isSpam($headers, $body);
+            if ($isSpam) {
+                $spamReason = $spamFilter->getLastSpamReason() ?? 'Spam filter detection';
+            }
+            
+            // Record new hash pattern (spam or clean) for future reference
+            if ($database) {
+                $database->recordEmailHash($subject, $body, $isSpam);
+                $logger->info("Email hash recorded as " . ($isSpam ? 'spam' : 'clean') . " for future detection");
+            }
+        }
 
         if ($isSpam) {
-            $logger->warning("Email flagged as spam. Processing according to spam_handling config.");
+            $logger->warning("Email flagged as spam: {$spamReason}");
             
             // Log detailed spam information
-            $spamReason = $spamFilter->getLastSpamReason() ?? 'Unknown spam detection';
             $this->logSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
             
             $this->handleSpamEmail($emailData, $headers, $recipient, $logger);
