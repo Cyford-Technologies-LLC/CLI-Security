@@ -16,10 +16,9 @@ class Database
         $dbPath = $config['database']['path'] ?? '/tmp/security.db';
         $this->cacheTtl = $config['database']['cache_ttl'] ?? 300;
         
-        // Ensure database directory exists
-        $dbDir = dirname($dbPath);
-        if (!is_dir($dbDir)) {
-            mkdir($dbDir, 0755, true);
+        // Use /tmp for database - always writable by all users
+        if (strpos($dbPath, '/tmp/') !== 0) {
+            $dbPath = '/tmp/cyford-security.db';
         }
         
         try {
@@ -195,7 +194,7 @@ class Database
     /**
      * Set cached value
      */
-    public function setCache(string $key, $value, int $ttl = null): void
+    public function setCache(string $key, $value, ?int $ttl = null): void
     {
         $ttl = $ttl ?? $this->cacheTtl;
         $expires = time() + $ttl;
