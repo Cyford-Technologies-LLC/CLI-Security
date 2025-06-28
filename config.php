@@ -1,10 +1,29 @@
 <?php
 
+// Load environment variables
+if (file_exists(__DIR__ . '/.env')) {
+    $lines = file(__DIR__ . '/.env', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    foreach ($lines as $line) {
+        if (strpos(trim($line), '#') === 0 || strpos($line, '=') === false) continue;
+        list($key, $value) = explode('=', $line, 2);
+        $_ENV[trim($key)] = trim($value);
+    }
+}
+
+// Helper function to get env variables
+function env($key, $default = null) {
+    return $_ENV[$key] ?? $default;
+}
+
 // Configuration for API endpoints, authentication, etc.
 return [
     'api' => [
         'login_endpoint' => 'https://api.cyfordtechnologies.com/api/auth/v1/login', // Login URL
         'report_endpoint' => 'https://api.cyfordtechnologies.com/api/security/v1/report-ip', // Report URL
+        'credentials' => [
+            'email' => env('API_EMAIL', ''),  // Account email for API login
+            'password' => env('API_PASSWORD', ''),  // Account password for API login
+        ],
     ],
     'postfix' => [
         'requeue_method' => 'smtp', // Options: smtp , sendmail, postdrop , postpickup (SMTP  is the only working method as of now)
@@ -32,10 +51,7 @@ return [
             'emails_file' => '/usr/local/share/cyford/security/lists/blacklist_emails.txt',
         ],
     ],
-    'credentials' => [
-        'email' => '',  // Account email for login
-        'password' => '',             // Account password for login
-    ],
+
     'log' => [
         'file_path' => '/var/log/cyford-security/application.log',
     ],
