@@ -11,8 +11,10 @@ if (file_exists(__DIR__ . '/.env')) {
 }
 
 // Helper function to get env variables
-function env($key, $default = null) {
-    return $_ENV[$key] ?? $default;
+if (!function_exists('env')) {
+    function env($key, $default = null) {
+        return $_ENV[$key] ?? $default;
+    }
 }
 
 // Configuration for API endpoints, authentication, etc.
