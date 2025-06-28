@@ -152,8 +152,8 @@ class Postfix
             return;
         }
 
-        // Get recipient first
-        $recipient = $this->extractEmailAddress($headers['To'] ?? '');
+        // Get recipient with multiple fallback methods
+        $recipient = $this->getRecipient($headers, $logger);
         if (empty($recipient)) {
             $logger->error("Recipient not found or invalid in email headers.");
             throw new RuntimeException("Recipient not found or invalid in email headers.");
@@ -263,7 +263,7 @@ class Postfix
 
 # Security filter service
 security-filter unix - n n - - pipe
-  flags=Rq user=report-ip argv=/usr/bin/php /usr/local/share/cyford/security/index.php --input_type=postfix --ips=\${{client_address}} --categories=3
+  flags=Rq user=report-ip argv=/usr/bin/php /usr/local/share/cyford/security/index.php --input_type=postfix --recipient=\${{recipient}} --ips=\${{client_address}} --categories=3
 EOF;
     }
 
@@ -326,16 +326,129 @@ EOF;
     }
 
     /**
-     * Extract email address from header
+     * Get recipient using multiple fallback methods
+     */
+    private function getRecipient(array $headers, $logger): string
+    {
+        // Method 1: Standard To header
+        if (!empty($headers['To'])) {
+            $recipient = $this->extractEmailAddress($headers['To']);
+            if (!empty($recipient)) {
+                $logger->info("Recipient found in To header: {$recipient}");
+                return $recipient;
+            }
+        }
+        
+        // Method 2: Delivered-To header (Postfix adds this)
+        if (!empty($headers['Delivered-To'])) {
+            $recipient = $this->extractEmailAddress($headers['Delivered-To']);
+            if (!empty($recipient)) {
+                $logger->info("Recipient found in Delivered-To header: {$recipient}");
+                return $recipient;
+            }
+        }
+        
+        // Method 3: X-Original-To header
+        if (!empty($headers['X-Original-To'])) {
+            $recipient = $this->extractEmailAddress($headers['X-Original-To']);
+            if (!empty($recipient)) {
+                $logger->info("Recipient found in X-Original-To header: {$recipient}");
+                return $recipient;
+            }
+        }
+        
+        // Method 4: Check common Postfix environment variables
+        $envVars = ['RECIPIENT', 'USER', 'ORIGINAL_RECIPIENT', 'EXTENSION'];
+        foreach ($envVars as $envVar) {
+            if (!empty($_ENV[$envVar])) {
+                $recipient = $this->extractEmailAddress($_ENV[$envVar]);
+                if (!empty($recipient)) {
+                    $logger->info("Recipient found in {$envVar} environment: {$recipient}");
+                    return $recipient;
+                }
+            }
+        }
+        
+        // Method 5: Parse from Postfix queue ID (last resort)
+        // Postfix often passes recipient info in the process environment
+        if (!empty($_SERVER['argv'])) {
+            foreach ($_SERVER['argv'] as $arg) {
+                if (strpos($arg, '@') !== false) {
+                    $recipient = $this->extractEmailAddress($arg);
+                    if (!empty($recipient)) {
+                        $logger->info("Recipient found in server argv: {$recipient}");
+                        return $recipient;
+                    }
+                }
+            }
+        }
+        
+        // Method 6: Check for --recipient argument from Postfix
+        global $argv;
+        if (!empty($argv)) {
+            for ($i = 0; $i < count($argv); $i++) {
+                if ($argv[$i] === '--recipient' && isset($argv[$i + 1])) {
+                    $recipient = $this->extractEmailAddress($argv[$i + 1]);
+                    if (!empty($recipient)) {
+                        $logger->info("Recipient found in --recipient argument: {$recipient}");
+                        return $recipient;
+                    }
+                }
+                // Also check for --recipient=email format
+                if (strpos($argv[$i], '--recipient=') === 0) {
+                    $recipient = $this->extractEmailAddress(substr($argv[$i], 12));
+                    if (!empty($recipient)) {
+                        $logger->info("Recipient found in --recipient= argument: {$recipient}");
+                        return $recipient;
+                    }
+                }
+            }
+            
+            // Fallback: any argument with @
+            foreach ($argv as $arg) {
+                if (strpos($arg, '@') !== false) {
+                    $recipient = $this->extractEmailAddress($arg);
+                    if (!empty($recipient)) {
+                        $logger->info("Recipient found in command line: {$recipient}");
+                        return $recipient;
+                    }
+                }
+            }
+        }
+        
+        // Method 7: Try to extract from any header containing an email
+        foreach ($headers as $headerName => $headerValue) {
+            if (strpos($headerValue, '@') !== false && !in_array($headerName, ['From', 'Reply-To', 'Return-Path', 'Sender'])) {
+                $recipient = $this->extractEmailAddress($headerValue);
+                if (!empty($recipient) && strpos($recipient, 'cyfordtechnologies.com') !== false) {
+                    $logger->info("Recipient found in {$headerName} header: {$recipient}");
+                    return $recipient;
+                }
+            }
+        }
+        
+        $logger->warning("No recipient found in any header or environment variable");
+        return '';
+    }
+
+    /**
+     * Extract email address from header with fallback methods
      */
     private function extractEmailAddress(string $toHeader): string
     {
+        // Method 1: Extract from angle brackets <email@domain.com>
         if (preg_match('/<([^>]+)>/', $toHeader, $matches)) {
             return $matches[1];
         }
 
+        // Method 2: Direct email validation
         if (filter_var($toHeader, FILTER_VALIDATE_EMAIL)) {
             return $toHeader;
+        }
+        
+        // Method 3: Extract first email-like pattern
+        if (preg_match('/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/', $toHeader, $matches)) {
+            return $matches[1];
         }
 
         return '';
