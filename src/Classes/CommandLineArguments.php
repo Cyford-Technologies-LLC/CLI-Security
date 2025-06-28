@@ -60,7 +60,7 @@ class CommandLineArguments
         }
 
         // Validate the input type
-        $validInputTypes = ['postfix', 'fail2ban', 'manual'];
+        $validInputTypes = ['postfix', 'fail2ban', 'manual', 'internal'];
         if (!in_array($inputType, $validInputTypes, true)) {
             throw new RuntimeException("Invalid input_type provided: {$inputType}. Valid options are: " . implode(', ', $validInputTypes));
         }
