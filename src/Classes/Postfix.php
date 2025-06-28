@@ -203,7 +203,7 @@ class Postfix
         }
 
         if ($isSpam) {
-            $logger->warning("Email flagged as spam: {$spamReason}");
+            $logger->warning("Email flagged as spam. Reason: {$spamReason}");
             
             // Log detailed spam information
             $this->logSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);

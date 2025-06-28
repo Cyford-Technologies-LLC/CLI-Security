@@ -6,3 +6,5 @@
 # noreply@service.com
 
 # Add trusted email addresses here
+alert@indeed.com
+do-not-reply@indeed.com

@@ -4,6 +4,7 @@ namespace Cyford\Security\Classes;
 class SpamFilter
 {
     private string $spamLogFile;
+    private string $lastSpamReason = '';
 
     public function __construct(array $config)
     {
@@ -39,10 +40,12 @@ class SpamFilter
 
         // 4. Log any detected spam and return status
         if (!empty($spamReasons)) {
-            $this->logSpam("Spam detected - Reasons: " . implode(', ', $spamReasons));
+            $this->lastSpamReason = implode(', ', $spamReasons);
+            $this->logSpam("Spam detected - Reasons: " . $this->lastSpamReason);
             return true;
         }
 
+        $this->lastSpamReason = '';
         return false;
     }
 
@@ -71,8 +74,7 @@ class SpamFilter
         $patterns = [
             '/(\bno inquiryso resolve\b)/i',                  // Specific example from provided emails
             '/\b(amounted old strictly|timed blind)\b/i',    // Patterns of repeated phrases
-            '/[a-z]{2,}\.[a-z]{2,}\.(com|net|org)/i',        // Suspicious domains in plain text
-            '/https?:\/\/[^\s]+/i',                          // Links embedded in the email body
+            // Removed overly broad URL and domain patterns that catch legitimate emails
         ];
 
         foreach ($patterns as $pattern) {
@@ -105,6 +107,14 @@ class SpamFilter
         }
 
         return false;
+    }
+
+    /**
+     * Get the reason why the last email was flagged as spam
+     */
+    public function getLastSpamReason(): string
+    {
+        return $this->lastSpamReason;
     }
 
     /**

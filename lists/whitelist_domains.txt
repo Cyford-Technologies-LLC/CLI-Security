@@ -6,3 +6,5 @@
 # company.com
 
 # Add trusted domains here
+indeed.com
+bounces.indeed.com
