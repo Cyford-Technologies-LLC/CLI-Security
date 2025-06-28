@@ -56,7 +56,7 @@ return [
 
     'database' => [
         'type' => 'sqlite', // Portable database, no installation required
-        'path' => '/tmp/cyford-security.db', // SQLite database file (always writable)
+        'path' => '/usr/local/share/cyford/security/data/security.db', // SQLite database file
         'cache_ttl' => 300, // Cache time-to-live in seconds (5 minutes)
     ],
     'log' => [

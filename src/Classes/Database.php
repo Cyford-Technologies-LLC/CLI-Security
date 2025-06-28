@@ -16,9 +16,10 @@ class Database
         $dbPath = $config['database']['path'] ?? '/tmp/security.db';
         $this->cacheTtl = $config['database']['cache_ttl'] ?? 300;
         
-        // Use /tmp for database - always writable by all users
-        if (strpos($dbPath, '/tmp/') !== 0) {
-            $dbPath = '/tmp/cyford-security.db';
+        // Ensure database directory exists
+        $dbDir = dirname($dbPath);
+        if (!is_dir($dbDir)) {
+            mkdir($dbDir, 0775, true);
         }
         
         try {
@@ -47,9 +48,7 @@ class Database
                     message_id TEXT,
                     spam_reason TEXT,
                     raw_email TEXT,
-                    action TEXT,
-                    INDEX(timestamp),
-                    INDEX(recipient)
+                    action TEXT
                 )
             ",
             
@@ -74,8 +73,7 @@ class Database
                     reputation_score INTEGER DEFAULT 0,
                     last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
                     spam_count INTEGER DEFAULT 0,
-                    clean_count INTEGER DEFAULT 0,
-                    INDEX(last_seen)
+                    clean_count INTEGER DEFAULT 0
                 )
             ",
             
@@ -91,10 +89,7 @@ class Database
                     first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
                     last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
                     count INTEGER DEFAULT 1,
-                    is_spam BOOLEAN DEFAULT 1,
-                    INDEX(combined_hash),
-                    INDEX(subject_hash),
-                    INDEX(body_hash)
+                    is_spam BOOLEAN DEFAULT 1
                 )
             ",
             
@@ -103,14 +98,28 @@ class Database
                 CREATE TABLE IF NOT EXISTS cache (
                     key TEXT PRIMARY KEY,
                     value TEXT,
-                    expires_at DATETIME,
-                    INDEX(expires_at)
+                    expires_at DATETIME
                 )
             "
         ];
         
         foreach ($tables as $name => $sql) {
             $this->pdo->exec($sql);
+        }
+        
+        // Create indexes separately for SQLite compatibility
+        $indexes = [
+            'CREATE INDEX IF NOT EXISTS idx_spam_log_timestamp ON spam_log(timestamp)',
+            'CREATE INDEX IF NOT EXISTS idx_spam_log_recipient ON spam_log(recipient)',
+            'CREATE INDEX IF NOT EXISTS idx_ip_reputation_last_seen ON ip_reputation(last_seen)',
+            'CREATE INDEX IF NOT EXISTS idx_spam_hashes_combined ON spam_hashes(combined_hash)',
+            'CREATE INDEX IF NOT EXISTS idx_spam_hashes_subject ON spam_hashes(subject_hash)',
+            'CREATE INDEX IF NOT EXISTS idx_spam_hashes_body ON spam_hashes(body_hash)',
+            'CREATE INDEX IF NOT EXISTS idx_cache_expires ON cache(expires_at)'
+        ];
+        
+        foreach ($indexes as $indexSql) {
+            $this->pdo->exec($indexSql);
         }
     }
     
