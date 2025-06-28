@@ -169,11 +169,15 @@ class Postfix
         $database = null;
         $skipSpamFilter = false;
         
+        $logger->info("Starting hash detection check...");
         if ($config['postfix']['spam_handling']['hash_detection'] ?? false) {
+            $logger->info("Hash detection is enabled, initializing database...");
             try {
                 $database = new \Cyford\Security\Classes\Database($config);
+                $logger->info("Database initialized successfully");
                 
                 // Check if this hash is known spam
+                $logger->info("Checking for known spam hash...");
                 if ($database->isKnownSpamHash($subject, $body)) {
                     $isSpam = true;
                     $spamReason = 'Known spam pattern (hash match)';
@@ -186,10 +190,14 @@ class Postfix
                     $spamReason = 'Known clean pattern (hash match)';
                     $skipSpamFilter = true;
                     $logger->info("Email marked as clean by hash detection - skipping spam filter.");
+                } else {
+                    $logger->info("No hash match found, will proceed to spam filter");
                 }
             } catch (Exception $e) {
                 $logger->warning("Database unavailable, skipping hash detection: " . $e->getMessage());
             }
+        } else {
+            $logger->info("Hash detection is disabled");
         }
         
         // If not caught by hash, check with spam filter

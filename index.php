@@ -29,15 +29,31 @@ try {
             break;
             
         case 'internal':
-            // Handle internal commands
+            // Handle internal commands directly without full bootstrap
+            require_once __DIR__ . '/src/Classes/Database.php';
+            require_once __DIR__ . '/src/Classes/Internal.php';
+            require_once __DIR__ . '/src/Classes/SpamFilter.php';
+            require_once __DIR__ . '/src/Classes/Systems.php';
+            
             $config = require __DIR__ . '/config.php';
-            $internal = new \Cyford\Security\Classes\Internal($config, $logger);
+            $internal = new \Cyford\Security\Classes\Internal($config, null);
+            
+            // Parse command line arguments manually for internal commands
             $args = [];
-            if ($cliArgs->has('command')) $args['command'] = $cliArgs->get('command');
-            if ($cliArgs->has('limit')) $args['limit'] = (int)$cliArgs->get('limit');
-            if ($cliArgs->has('pattern_id')) $args['pattern_id'] = (int)$cliArgs->get('pattern_id');
-            if ($cliArgs->has('subject')) $args['subject'] = $cliArgs->get('subject');
-            if ($cliArgs->has('body')) $args['body'] = $cliArgs->get('body');
+            foreach ($argv as $arg) {
+                if (strpos($arg, '--command=') === 0) {
+                    $args['command'] = substr($arg, 10);
+                } elseif (strpos($arg, '--limit=') === 0) {
+                    $args['limit'] = (int)substr($arg, 8);
+                } elseif (strpos($arg, '--pattern_id=') === 0) {
+                    $args['pattern_id'] = (int)substr($arg, 13);
+                } elseif (strpos($arg, '--subject=') === 0) {
+                    $args['subject'] = substr($arg, 10);
+                } elseif (strpos($arg, '--body=') === 0) {
+                    $args['body'] = substr($arg, 7);
+                }
+            }
+            
             $internal->processCommand($args);
             break;
 
