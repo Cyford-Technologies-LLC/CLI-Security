@@ -833,26 +833,34 @@ EOF;
         $username = basename($userPath);
         
         // Skip system directories
-        $systemDirs = ['lost+found', 'ftp', 'www', 'backup', 'tmp'];
+        $systemDirs = ['lost+found', 'ftp', 'www', 'backup', 'tmp', 'skel'];
         if (in_array($username, $systemDirs)) {
             return false;
         }
         
-        // Check if user exists in system
+        // Skip usernames that are too short or contain invalid characters
+        if (strlen($username) < 2 || !preg_match('/^[a-zA-Z0-9_-]+$/', $username)) {
+            return false;
+        }
+        
+        // Check if user exists in system using id command
         exec("id {$username} 2>/dev/null", $output, $returnCode);
         if ($returnCode !== 0) {
             return false;
         }
         
-        // Check if directory is owned by the user
-        $stat = stat($userPath);
-        $userInfo = posix_getpwnam($username);
+        // Check if directory looks like a home directory (has typical structure)
+        $hasHomeStructure = false;
+        $homeIndicators = ['.bashrc', '.profile', '.bash_profile', 'Maildir', 'Maildir-cyford', '.ssh'];
         
-        if ($userInfo && $stat && $stat['uid'] === $userInfo['uid']) {
-            return true;
+        foreach ($homeIndicators as $indicator) {
+            if (file_exists($userPath . '/' . $indicator)) {
+                $hasHomeStructure = true;
+                break;
+            }
         }
         
-        return false;
+        return $hasHomeStructure;
     }
 
     /**
