@@ -848,26 +848,15 @@ EOF;
                 
                 $logger->info("No existing spam folder found, creating: {$maildirPath}");
                 
-                // Create using sudo to ensure proper ownership
-                $createCommands = [
-                    "sudo -u {$realUser} mkdir -p {$maildirPath}",
-                    "sudo -u {$realUser} mkdir -p {$maildirPath}/cur",
-                    "sudo -u {$realUser} mkdir -p {$maildirPath}/new",
-                    "sudo -u {$realUser} mkdir -p {$maildirPath}/tmp"
-                ];
-                
+                // Create directories directly (no sudo in chroot)
                 $success = true;
-                foreach ($createCommands as $cmd) {
-                    exec($cmd, $output, $returnCode);
-                    if ($returnCode !== 0) {
-                        $logger->error("Failed command: {$cmd}");
-                        $success = false;
-                        break;
-                    }
-                }
+                $success = $success && mkdir($maildirPath, 0775, true);
+                $success = $success && mkdir($maildirPath . '/cur', 0775, true);
+                $success = $success && mkdir($maildirPath . '/new', 0775, true);
+                $success = $success && mkdir($maildirPath . '/tmp', 0775, true);
                 
                 if ($success) {
-                    $logger->info("Created spam folder with proper ownership: {$maildirPath}");
+                    $logger->info("Created spam folder: {$maildirPath}");
                 } else {
                     $logger->error("Failed to create spam folder: {$maildirPath}");
                     throw new \RuntimeException("Quarantine failed - cannot create spam folder");
