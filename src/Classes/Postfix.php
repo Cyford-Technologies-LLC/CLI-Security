@@ -813,17 +813,48 @@ EOF;
             $userMaildir = str_replace('{user}', $realUser, $maildirTemplate);
             $maildirPath = "{$userMaildir}/.{$spamFolder}";
             
+            $logger->info("Quarantine method: user_maildir, Target path: {$maildirPath}");
+            $logger->info("Real user: {$realUser}, Maildir template: {$maildirTemplate}");
+            $logger->info("User maildir: {$userMaildir}, Spam folder: {$spamFolder}");
+            
+            // Check if user maildir exists
+            if (!is_dir($userMaildir)) {
+                $logger->error("User maildir does not exist: {$userMaildir}");
+                throw new \RuntimeException("User maildir does not exist: {$userMaildir}");
+            }
+            
             // Create spam folder if it doesn't exist
             if (!is_dir($maildirPath)) {
-                if (mkdir($maildirPath, 0755, true) &&
-                    mkdir($maildirPath . '/cur', 0755, true) &&
-                    mkdir($maildirPath . '/new', 0755, true) &&
-                    mkdir($maildirPath . '/tmp', 0755, true)) {
+                $logger->info("Creating spam folder structure at: {$maildirPath}");
+                
+                $success = true;
+                $success = $success && mkdir($maildirPath, 0755, true);
+                $logger->info("mkdir {$maildirPath}: " . ($success ? 'SUCCESS' : 'FAILED'));
+                
+                if ($success) {
+                    $success = $success && mkdir($maildirPath . '/cur', 0755, true);
+                    $logger->info("mkdir {$maildirPath}/cur: " . ($success ? 'SUCCESS' : 'FAILED'));
+                }
+                
+                if ($success) {
+                    $success = $success && mkdir($maildirPath . '/new', 0755, true);
+                    $logger->info("mkdir {$maildirPath}/new: " . ($success ? 'SUCCESS' : 'FAILED'));
+                }
+                
+                if ($success) {
+                    $success = $success && mkdir($maildirPath . '/tmp', 0755, true);
+                    $logger->info("mkdir {$maildirPath}/tmp: " . ($success ? 'SUCCESS' : 'FAILED'));
+                }
+                
+                if ($success) {
                     $logger->info("Created user maildir spam folder: {$maildirPath}");
                 } else {
                     $logger->error("Failed to create user maildir spam folder: {$maildirPath}");
+                    $logger->error("Last error: " . (error_get_last()['message'] ?? 'Unknown error'));
                     throw new \RuntimeException("Quarantine failed - cannot create spam folder");
                 }
+            } else {
+                $logger->info("Spam folder already exists: {$maildirPath}");
             }
             $spamFile = $maildirPath . '/new/';
         } else {

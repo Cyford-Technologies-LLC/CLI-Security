@@ -301,6 +301,19 @@ php index.php --input_type=internal --command=create-user --username=testuser --
 - 📁 Maildir structure with Spam folder
 - 🔐 Proper permissions and ownership
 
+#### **Setup User Directory Permissions:**
+```bash
+# Configure user directories for postfix access (enables user_maildir quarantine)
+php index.php --input_type=internal --command=setup-user-permissions --username=testuser
+```
+
+**Permission setup includes:**
+- 👥 Adds postfix user to user's group
+- 🏠 Sets group permissions on home directory
+- 📁 Configures maildir for postfix access
+- 📧 Creates spam folder with proper permissions
+- ✅ Enables user maildir quarantine method
+
 ### **Spam Pattern Management**
 
 #### **View and Manage Spam Patterns:**
@@ -347,7 +360,10 @@ php index.php --input_type=internal --command=setup-database
 # 3. Create mail users
 php index.php --input_type=internal --command=create-user --username=admin --password=securepass
 
-# 4. Test system
+# 4. Setup user directory permissions (for user_maildir quarantine)
+php index.php --input_type=internal --command=setup-user-permissions --username=admin
+
+# 5. Test system
 php index.php --input_type=internal --command=stats
 ```
 
@@ -383,6 +399,49 @@ The system includes advanced hash-based spam detection that:
 ```
 
 **Note:** Run `setup-database` command first to initialize the SQLite database with proper permissions.
+
+### **Quarantine Configuration**
+
+CLI-Security supports two quarantine methods for spam emails:
+
+#### **Method 1: User Maildir (Recommended)**
+```php
+'quarantine_method' => 'user_maildir',
+'maildir_path' => '/home/{user}/Maildir-cyford',
+```
+
+**Setup:**
+```bash
+# Configure user directory permissions
+php index.php --input_type=internal --command=setup-user-permissions --username=allen
+```
+
+**Benefits:**
+- ✅ **Email Client Integration** - Spam folder appears in user's email client
+- ✅ **User Management** - Users can view, move, and delete quarantined emails
+- ✅ **Standard Maildir** - Compatible with IMAP/POP3 protocols
+- ✅ **Proper Organization** - Spam stored in user's mailbox structure
+
+#### **Method 2: System Quarantine**
+```php
+'quarantine_method' => 'system_quarantine',
+'system_quarantine_path' => '/var/spool/postfix/quarantine',
+```
+
+**Benefits:**
+- ✅ **Chroot Compatible** - Works in restricted Postfix environments
+- ✅ **No Setup Required** - Works out of the box
+- ✅ **Admin Managed** - Centralized spam storage
+- ✅ **Always Accessible** - No user directory dependencies
+
+**Access quarantined emails:**
+```bash
+# View user's quarantined spam
+ls -la /var/spool/postfix/quarantine/username/
+
+# Move to user's maildir if needed
+cp /var/spool/postfix/quarantine/username/*.spam /home/username/Maildir/.Spam/new/
+```
 
 ---
 

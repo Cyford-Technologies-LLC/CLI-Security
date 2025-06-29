@@ -51,6 +51,10 @@ try {
                     $args['subject'] = substr($arg, 10);
                 } elseif (strpos($arg, '--body=') === 0) {
                     $args['body'] = substr($arg, 7);
+                } elseif (strpos($arg, '--username=') === 0) {
+                    $args['username'] = substr($arg, 11);
+                } elseif (strpos($arg, '--password=') === 0) {
+                    $args['password'] = substr($arg, 11);
                 }
             }
             
