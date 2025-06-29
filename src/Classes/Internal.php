@@ -825,11 +825,11 @@ EOF;
             echo "  ✅ Set group read/execute on /home/{$username}\n";
         }
         
-        // Set group permissions on maildir
+        // Set group permissions on maildir - change group to postfix for all subdirectories
         if (is_dir($userMaildir)) {
             exec("chmod -R g+rwx {$userMaildir}");
-            exec("chgrp -R {$username} {$userMaildir}");
-            echo "  ✅ Set group permissions on {$userMaildir}\n";
+            exec("find {$userMaildir} -type d -name '.*' -exec chgrp postfix {} \;");
+            echo "  ✅ Set group permissions and changed subdirectory groups to postfix: {$userMaildir}\n";
         } else {
             echo "  ℹ️  Maildir {$userMaildir} doesn't exist yet\n";
         }
@@ -855,10 +855,10 @@ EOF;
         }
         
         if ($existingSpamFolder) {
-            // Fix permissions on existing folder
-            exec("chown -R {$username}:{$username} {$existingSpamFolder}");
+            // Fix permissions on existing folder - use postfix group
+            exec("chown -R {$username}:postfix {$existingSpamFolder}");
             exec("chmod -R g+rwx {$existingSpamFolder}");
-            echo "  ✅ Fixed permissions on existing spam folder: {$existingSpamFolder}\n";
+            echo "  ✅ Fixed permissions on existing spam folder (postfix group): {$existingSpamFolder}\n";
         } else {
             // Create default spam folder using sudo for proper ownership
             $spamFolder = $userMaildir . '/.Spam';
@@ -880,8 +880,9 @@ EOF;
                 }
                 
                 if ($success) {
+                    exec("chgrp -R postfix {$spamFolder}");
                     exec("chmod -R g+rwx {$spamFolder}");
-                    echo "  ✅ Created spam folder with proper ownership: {$spamFolder}\n";
+                    echo "  ✅ Created spam folder with postfix group: {$spamFolder}\n";
                 } else {
                     echo "  ❌ Failed to create spam folder\n";
                 }
