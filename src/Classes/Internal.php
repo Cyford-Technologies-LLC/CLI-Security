@@ -1072,20 +1072,20 @@ EOF;
 # Cyford Web Armor Sieve Configuration
 # Auto-generated - Safe to remove if not needed
 
-# Explicitly disable sieve for IMAP to prevent loading errors
+# CRITICAL: Explicitly override IMAP to NOT load sieve plugin
 protocol imap {
-  # Remove sieve from IMAP mail_plugins if it exists
-  mail_plugins = $mail_plugins
+  # Force IMAP to not load sieve - override any global setting
+  mail_plugins = 
 }
 
 # Enable Sieve plugin ONLY for LDA (Local Delivery Agent)
 protocol lda {
-  mail_plugins = $mail_plugins sieve
+  mail_plugins = sieve
 }
 
 # Enable Sieve plugin ONLY for LMTP
 protocol lmtp {
-  mail_plugins = $mail_plugins sieve
+  mail_plugins = sieve
 }
 
 # ManageSieve service for remote sieve management
@@ -1093,22 +1093,12 @@ service managesieve-login {
   inet_listener sieve {
     port = 4190
   }
-  service_count = 1
-  process_min_avail = 0
-  vsz_limit = 64M
-}
-
-service managesieve {
-  process_limit = 1024
 }
 
 # Sieve plugin settings (only active for LDA/LMTP)
 plugin {
-  sieve = file:~/sieve;active=~/.dovecot.sieve
+  sieve = ~/.dovecot.sieve
   sieve_dir = ~/sieve
-  sieve_max_script_size = 1M
-  sieve_max_actions = 32
-  sieve_max_redirects = 4
 }
 DOVECOT;
             
