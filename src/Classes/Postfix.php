@@ -122,11 +122,45 @@ class Postfix
     }
 
     /**
-     * Process email from Postfix content filter
+     * Process email from Postfix content filter with error handling
      */
     public function processEmail($spamFilter, $logger): void
     {
+        global $config;
+        $errorHandling = $config['postfix']['error_handling'] ?? [];
+        $onSystemError = $errorHandling['on_system_error'] ?? 'pass';
+        $maxRetries = $errorHandling['max_retries'] ?? 3;
+        $retryDelay = $errorHandling['retry_delay'] ?? 1;
+        $failSafeMode = $errorHandling['fail_safe_mode'] ?? true;
+        
         $logger->info("Processing email received from Postfix...");
+        
+        // Wrap email processing in error handling
+        for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
+            try {
+                $this->processEmailInternal($spamFilter, $logger);
+                return; // Success - exit retry loop
+            } catch (Exception $e) {
+                $this->logSystemError($e, $attempt, $logger);
+                
+                if ($attempt < $maxRetries) {
+                    $logger->warning("Attempt {$attempt} failed, retrying in {$retryDelay} seconds...");
+                    sleep($retryDelay);
+                    continue;
+                }
+                
+                // All retries exhausted - handle according to config
+                $this->handleSystemError($e, $onSystemError, $failSafeMode, $logger);
+                return;
+            }
+        }
+    }
+    
+    /**
+     * Internal email processing (original processEmail logic)
+     */
+    private function processEmailInternal($spamFilter, $logger): void
+    {
         
         // Skip configuration check during email processing
         // This prevents autoConfig from running during email processing
@@ -1004,6 +1038,137 @@ EOF;
             
         } catch (Exception $e) {
             $logger->warning("Failed to send spam data to API: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Handle system errors according to configuration
+     */
+    private function handleSystemError(Exception $e, string $onSystemError, bool $failSafeMode, $logger): void
+    {
+        $logger->error("System error after all retries: " . $e->getMessage());
+        
+        // Read email data for error handling
+        $emailData = file_get_contents('php://stdin');
+        if (!$emailData) {
+            $logger->error("Cannot read email data for error handling");
+            exit(1);
+        }
+        
+        list($headers, $body) = $this->parseEmail($emailData);
+        $recipient = $this->getRecipient($headers, $logger);
+        
+        switch ($onSystemError) {
+            case 'pass':
+                $logger->info("System error - passing email through as configured");
+                if ($failSafeMode) {
+                    $emailData = $this->addSystemErrorFooter($emailData);
+                }
+                $this->requeueEmail($emailData, $recipient, $logger);
+                break;
+                
+            case 'fail':
+                $logger->info("System error - failing email as configured");
+                $this->bounceSystemError($headers, $e->getMessage(), $logger);
+                break;
+                
+            case 'quarantine':
+                $logger->info("System error - quarantining email as configured");
+                $this->quarantineSystemError($emailData, $recipient, $e->getMessage(), $logger);
+                break;
+                
+            default:
+                $logger->warning("Unknown error handling action: {$onSystemError}, defaulting to pass");
+                $this->requeueEmail($emailData, $recipient, $logger);
+        }
+    }
+    
+    /**
+     * Log system errors
+     */
+    private function logSystemError(Exception $e, int $attempt, $logger): void
+    {
+        global $config;
+        $errorLogFile = $config['postfix']['error_handling']['error_log_file'] ?? '/var/log/cyford-security/system-errors.log';
+        
+        $timestamp = date('Y-m-d H:i:s');
+        $errorEntry = "[{$timestamp}] ATTEMPT {$attempt}: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine() . "\n";
+        
+        file_put_contents($errorLogFile, $errorEntry, FILE_APPEND | LOCK_EX);
+        $logger->error("System error (attempt {$attempt}): " . $e->getMessage());
+    }
+    
+    /**
+     * Add system error footer to email
+     */
+    private function addSystemErrorFooter(string $emailData): string
+    {
+        $footer = "\n\n--- WARNING: This email was processed with system errors - Cyford Web Armor ---";
+        
+        if (preg_match('/(.*?\r?\n\r?\n)(.*)/s', $emailData, $matches)) {
+            $headers = $matches[1];
+            $body = $matches[2];
+            return $headers . $body . $footer;
+        }
+        
+        return $emailData . $footer;
+    }
+    
+    /**
+     * Bounce email due to system error
+     */
+    private function bounceSystemError(array $headers, string $errorMessage, $logger): void
+    {
+        $from = $headers['From'] ?? 'unknown';
+        $subject = $headers['Subject'] ?? 'No Subject';
+        
+        $bounceMessage = "Your email could not be processed due to a system error.\n\n";
+        $bounceMessage .= "Error: {$errorMessage}\n\n";
+        $bounceMessage .= "Please try again later or contact the administrator.";
+        
+        $bounceEmail = $this->createBounceMessage($headers, $bounceMessage);
+        
+        $tempFile = tempnam('/tmp', 'system_error_bounce_');
+        file_put_contents($tempFile, $bounceEmail);
+        
+        $command = "/usr/sbin/sendmail -t < {$tempFile}";
+        shell_exec($command);
+        
+        unlink($tempFile);
+        $logger->info("System error bounce sent to: {$from}");
+    }
+    
+    /**
+     * Quarantine email due to system error
+     */
+    private function quarantineSystemError(string $emailData, string $recipient, string $errorMessage, $logger): void
+    {
+        $realUser = $this->resolveEmailAlias($recipient, $logger);
+        if (!$realUser) {
+            $logger->error("Cannot quarantine - could not resolve recipient {$recipient}");
+            return;
+        }
+        
+        $quarantineFolder = "/home/{$realUser}/Maildir/.SystemErrors";
+        
+        if (!is_dir($quarantineFolder)) {
+            mkdir($quarantineFolder, 0755, true);
+            mkdir($quarantineFolder . '/cur', 0755, true);
+            mkdir($quarantineFolder . '/new', 0755, true);
+            mkdir($quarantineFolder . '/tmp', 0755, true);
+        }
+        
+        $filename = time() . '.' . uniqid() . '.syserr';
+        $errorFile = $quarantineFolder . '/new/' . $filename;
+        
+        // Add error information to email
+        $errorHeader = "X-System-Error: {$errorMessage}\r\n";
+        $emailData = $errorHeader . $emailData;
+        
+        if (file_put_contents($errorFile, $emailData)) {
+            $logger->info("Email quarantined due to system error: {$errorFile}");
+        } else {
+            $logger->error("Failed to quarantine email with system error");
         }
     }
 

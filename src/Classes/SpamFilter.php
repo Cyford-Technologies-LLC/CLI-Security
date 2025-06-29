@@ -8,8 +8,8 @@ class SpamFilter
 
     public function __construct(array $config)
     {
-        // Spam log file location
-        $this->spamLogFile = $config['errors']['error_log_location'] ?? __DIR__ . '/logs/spam.log';
+        // Use proper spam log file location
+        $this->spamLogFile = $config['postfix']['spam_handling']['spam_log_file'] ?? '/var/log/cyford-security/spam.log';
     }
 
     /**

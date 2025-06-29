@@ -41,8 +41,15 @@ return [
             'add_footer' => true, // Add spam filter footer to clean emails
             'footer_text' => '\n\n--- This email has been scanned by Cyford Web Armor ---',
             'spam_log_file' => '/var/log/cyford-security/spam.log', // Detailed spam log with raw emails
-            'hash_detection' => true, // Enable hash-based detection (database is now set up)
+            'hash_detection' => false, // Temporarily disable due to database permission issues
             'hash_threshold' => 3, // Block after X identical emails
+        ],
+        'error_handling' => [
+            'on_system_error' => 'pass', // Options: 'pass', 'fail', 'quarantine'
+            'error_log_file' => '/var/log/cyford-security/system-errors.log',
+            'max_retries' => 3, // Number of retries before giving up
+            'retry_delay' => 1, // Seconds to wait between retries
+            'fail_safe_mode' => true, // If true, always pass emails when in doubt
         ],
         'whitelist' => [
             'ips_file' => '/usr/local/share/cyford/security/lists/whitelist_ips.txt',
@@ -76,6 +83,6 @@ return [
     ],
     'errors' => [
         'report_errors' => 1,
-        'error_log_location' =>  __DIR__ . '/var/log/cyford-security/errors/error.log',
+        'error_log_location' => '/var/log/cyford-security/errors/error.log',
     ],
 ];
