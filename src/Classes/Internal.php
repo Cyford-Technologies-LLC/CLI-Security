@@ -1044,11 +1044,46 @@ EOF;
         
         // Check version compatibility
         exec('dovecot --version 2>/dev/null', $dovecotVersion);
-        exec('rpm -q dovecot-pigeonhole 2>/dev/null', $pigeonholeVersion);
+        exec('rpm -q dovecot dovecot-pigeonhole 2>/dev/null', $packageVersions);
         
-        if (!empty($dovecotVersion) && !empty($pigeonholeVersion)) {
+        if (!empty($dovecotVersion) && !empty($packageVersions)) {
             echo "ℹ️  Dovecot version: " . implode(' ', $dovecotVersion) . "\n";
-            echo "ℹ️  Pigeonhole version: " . implode(' ', $pigeonholeVersion) . "\n";
+            foreach ($packageVersions as $pkg) {
+                echo "ℹ️  Package: {$pkg}\n";
+            }
+            
+            // Check for version mismatch
+            $dovecotPkg = array_filter($packageVersions, function($pkg) { return strpos($pkg, 'dovecot-2') === 0; });
+            $pigeonholePkg = array_filter($packageVersions, function($pkg) { return strpos($pkg, 'dovecot-pigeonhole') === 0; });
+            
+            if (!empty($dovecotPkg) && !empty($pigeonholePkg)) {
+                $dovecotVer = reset($dovecotPkg);
+                $pigeonholeVer = reset($pigeonholePkg);
+                
+                // Extract version numbers for comparison
+                preg_match('/dovecot-([0-9.]+)/', $dovecotVer, $doveMatches);
+                preg_match('/dovecot-pigeonhole-([0-9.]+)/', $pigeonholeVer, $pigeonMatches);
+                
+                if (!empty($doveMatches[1]) && !empty($pigeonMatches[1])) {
+                    if ($doveMatches[1] !== $pigeonMatches[1]) {
+                        echo "⚠️  WARNING: Version mismatch detected!\n";
+                        echo "    Dovecot: {$doveMatches[1]}\n";
+                        echo "    Pigeonhole: {$pigeonMatches[1]}\n";
+                        echo "    This may cause symbol errors. Consider reinstalling matching versions.\n";
+                        
+                        // Offer to fix version mismatch
+                        echo "🔧 Attempting to fix version mismatch...\n";
+                        exec('dnf reinstall -y dovecot dovecot-pigeonhole 2>/dev/null', $reinstallOutput, $reinstallReturn);
+                        if ($reinstallReturn === 0) {
+                            echo "✅ Reinstalled packages with matching versions\n";
+                        } else {
+                            echo "❌ Failed to reinstall packages\n";
+                        }
+                    } else {
+                        echo "✅ Dovecot and Pigeonhole versions match\n";
+                    }
+                }
+            }
         }
         
         // Configure Dovecot for Sieve
@@ -1228,52 +1263,44 @@ DOVECOT;
         $sieveScript = "{$homeDir}/.dovecot.sieve";
         $spamSieveScript = "{$sieveDir}/spam-filter.sieve";
         
-        // Create spam filtering sieve script
+        // Create simple main sieve script directly (no subdirectory approach)
         $spamRules = $this->generateSpamSieveRules();
         
-        if (file_exists($spamSieveScript)) {
-            $existingContent = file_get_contents($spamSieveScript);
+        if (file_exists($sieveScript)) {
+            $existingContent = file_get_contents($sieveScript);
             if (strpos($existingContent, 'X-Spam-Flag') !== false) {
-                echo "  ℹ️  Spam filtering rules already exist in: {$spamSieveScript}\n";
+                echo "  ℹ️  Spam filtering rules already exist in: {$sieveScript}\n";
                 return;
             }
         }
         
-        // Write spam filtering rules
-        file_put_contents($spamSieveScript, $spamRules);
-        exec("chown {$username}:{$username} {$spamSieveScript}");
-        exec("chmod 644 {$spamSieveScript}");
-        echo "  ✅ Created spam filtering rules: {$spamSieveScript}\n";
-        
-        // Create or update main sieve script to include spam filter
-        $mainSieveContent = $this->generateMainSieveScript();
-        
-        if (file_exists($sieveScript)) {
-            $existingMain = file_get_contents($sieveScript);
-            if (strpos($existingMain, 'spam-filter.sieve') !== false) {
-                echo "  ℹ️  Main sieve script already includes spam filter\n";
-            } else {
-                // Append to existing script
-                $mainSieveContent = $existingMain . "\n" . $mainSieveContent;
-                file_put_contents($sieveScript, $mainSieveContent);
-                echo "  ✅ Updated main sieve script to include spam filter\n";
-            }
-        } else {
-            // Create new main script
-            file_put_contents($sieveScript, $mainSieveContent);
-            echo "  ✅ Created main sieve script: {$sieveScript}\n";
-        }
-        
-        // Set proper ownership
+        // Write spam filtering rules directly to main sieve script
+        file_put_contents($sieveScript, $spamRules);
         exec("chown {$username}:{$username} {$sieveScript}");
         exec("chmod 644 {$sieveScript}");
+        echo "  ✅ Created sieve script: {$sieveScript}\n";
+        
+        // Create sieve directory for future use
+        $sieveDir = "{$homeDir}/sieve";
+        if (!is_dir($sieveDir)) {
+            exec("sudo -u {$username} mkdir -p {$sieveDir}");
+            echo "  📁 Created sieve directory: {$sieveDir}\n";
+        }
         
         // Compile sieve script
         exec("sudo -u {$username} sievec {$sieveScript} 2>/dev/null", $compileOutput, $compileReturn);
         if ($compileReturn === 0) {
             echo "  ✅ Compiled sieve script successfully\n";
         } else {
-            echo "  ⚠️  Sieve compilation may have issues (this is often normal)\n";
+            echo "  ⚠️  Sieve compilation may have issues\n";
+            // Try manual compilation
+            exec("sievec {$sieveScript} 2>&1", $manualCompile, $manualReturn);
+            if ($manualReturn === 0) {
+                exec("chown {$username}:{$username} {$sieveScript}c");
+                echo "  ✅ Manual compilation successful\n";
+            } else {
+                echo "  ❌ Compilation failed: " . implode(' ', $manualCompile) . "\n";
+            }
         }
         
         // Reload Dovecot to pick up changes
