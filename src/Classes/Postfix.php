@@ -811,11 +811,9 @@ EOF;
             // Use user's maildir (requires proper permissions)
             $maildirTemplate = $config['postfix']['spam_handling']['maildir_path'] ?? '/home/{user}/Maildir';
             $userMaildir = str_replace('{user}', $realUser, $maildirTemplate);
-            $maildirPath = "{$userMaildir}/.{$spamFolder}";
             
-            $logger->info("Quarantine method: user_maildir, Target path: {$maildirPath}");
-            $logger->info("Real user: {$realUser}, Maildir template: {$maildirTemplate}");
-            $logger->info("User maildir: {$userMaildir}, Spam folder: {$spamFolder}");
+            $logger->info("Quarantine method: user_maildir");
+            $logger->info("Real user: {$realUser}, User maildir: {$userMaildir}");
             
             // Check if user maildir exists
             if (!is_dir($userMaildir)) {
@@ -823,39 +821,59 @@ EOF;
                 throw new \RuntimeException("User maildir does not exist: {$userMaildir}");
             }
             
-            // Create spam folder if it doesn't exist
-            if (!is_dir($maildirPath)) {
-                $logger->info("Creating spam folder structure at: {$maildirPath}");
+            // Detect existing spam folders (common names)
+            $spamFolderCandidates = [
+                '.Spambox',     // Your existing folder
+                '.Spam',        // Common name
+                '.Junk',        // Thunderbird
+                '.Junk Email',  // Outlook
+                '.INBOX.Spam',  // Some IMAP setups
+                '.INBOX.Junk'   // Some IMAP setups
+            ];
+            
+            $maildirPath = null;
+            foreach ($spamFolderCandidates as $candidate) {
+                $candidatePath = $userMaildir . '/' . $candidate;
+                if (is_dir($candidatePath)) {
+                    $maildirPath = $candidatePath;
+                    $logger->info("Found existing spam folder: {$maildirPath}");
+                    break;
+                }
+            }
+            
+            // If no existing spam folder found, create default one
+            if (!$maildirPath) {
+                $defaultSpamFolder = $config['postfix']['spam_handling']['quarantine_folder'] ?? 'Spam';
+                $maildirPath = "{$userMaildir}/.{$defaultSpamFolder}";
+                
+                $logger->info("No existing spam folder found, creating: {$maildirPath}");
+                
+                // Create using sudo to ensure proper ownership
+                $createCommands = [
+                    "sudo -u {$realUser} mkdir -p {$maildirPath}",
+                    "sudo -u {$realUser} mkdir -p {$maildirPath}/cur",
+                    "sudo -u {$realUser} mkdir -p {$maildirPath}/new",
+                    "sudo -u {$realUser} mkdir -p {$maildirPath}/tmp"
+                ];
                 
                 $success = true;
-                $success = $success && mkdir($maildirPath, 0755, true);
-                $logger->info("mkdir {$maildirPath}: " . ($success ? 'SUCCESS' : 'FAILED'));
-                
-                if ($success) {
-                    $success = $success && mkdir($maildirPath . '/cur', 0755, true);
-                    $logger->info("mkdir {$maildirPath}/cur: " . ($success ? 'SUCCESS' : 'FAILED'));
+                foreach ($createCommands as $cmd) {
+                    exec($cmd, $output, $returnCode);
+                    if ($returnCode !== 0) {
+                        $logger->error("Failed command: {$cmd}");
+                        $success = false;
+                        break;
+                    }
                 }
                 
                 if ($success) {
-                    $success = $success && mkdir($maildirPath . '/new', 0755, true);
-                    $logger->info("mkdir {$maildirPath}/new: " . ($success ? 'SUCCESS' : 'FAILED'));
-                }
-                
-                if ($success) {
-                    $success = $success && mkdir($maildirPath . '/tmp', 0755, true);
-                    $logger->info("mkdir {$maildirPath}/tmp: " . ($success ? 'SUCCESS' : 'FAILED'));
-                }
-                
-                if ($success) {
-                    $logger->info("Created user maildir spam folder: {$maildirPath}");
+                    $logger->info("Created spam folder with proper ownership: {$maildirPath}");
                 } else {
-                    $logger->error("Failed to create user maildir spam folder: {$maildirPath}");
-                    $logger->error("Last error: " . (error_get_last()['message'] ?? 'Unknown error'));
+                    $logger->error("Failed to create spam folder: {$maildirPath}");
                     throw new \RuntimeException("Quarantine failed - cannot create spam folder");
                 }
-            } else {
-                $logger->info("Spam folder already exists: {$maildirPath}");
             }
+            
             $spamFile = $maildirPath . '/new/';
         } else {
             // Use system quarantine (chroot compatible)

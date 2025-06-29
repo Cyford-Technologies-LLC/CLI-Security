@@ -783,12 +783,19 @@ EOF;
         $maildirTemplate = $this->config['postfix']['spam_handling']['maildir_path'] ?? '/home/{user}/Maildir';
         $userMaildir = str_replace('{user}', $username, $maildirTemplate);
         
-        // Add postfix user to user's group
+        // Add postfix and report-ip users to user's group
         exec("usermod -a -G {$username} postfix 2>/dev/null", $output, $returnCode);
         if ($returnCode === 0) {
             echo "  ✅ Added postfix user to {$username} group\n";
         } else {
             echo "  ℹ️  Could not add postfix to {$username} group (user may not exist)\n";
+        }
+        
+        exec("usermod -a -G {$username} report-ip 2>/dev/null", $output, $returnCode);
+        if ($returnCode === 0) {
+            echo "  ✅ Added report-ip user to {$username} group\n";
+        } else {
+            echo "  ℹ️  Could not add report-ip to {$username} group\n";
         }
         
         // Set group permissions on user's home directory
@@ -806,21 +813,58 @@ EOF;
             echo "  ℹ️  Maildir {$userMaildir} doesn't exist yet\n";
         }
         
-        // Create spam folder with proper permissions
-        $spamFolder = $userMaildir . '/.Spam';
-        if (!is_dir($spamFolder)) {
-            if (is_dir($userMaildir)) {
-                mkdir($spamFolder, 0775, true);
-                mkdir($spamFolder . '/cur', 0775, true);
-                mkdir($spamFolder . '/new', 0775, true);
-                mkdir($spamFolder . '/tmp', 0775, true);
-                
-                exec("chgrp -R {$username} {$spamFolder}");
-                exec("chmod -R g+rwx {$spamFolder}");
-                echo "  ✅ Created spam folder with group permissions: {$spamFolder}\n";
+        // Detect existing spam folders
+        $spamFolderCandidates = [
+            '.Spambox',     // Existing folder
+            '.Spam',        // Common name
+            '.Junk',        // Thunderbird
+            '.Junk Email',  // Outlook
+            '.INBOX.Spam',  // IMAP
+            '.INBOX.Junk'   // IMAP
+        ];
+        
+        $existingSpamFolder = null;
+        foreach ($spamFolderCandidates as $candidate) {
+            $candidatePath = $userMaildir . '/' . $candidate;
+            if (is_dir($candidatePath)) {
+                $existingSpamFolder = $candidatePath;
+                echo "  📬 Found existing spam folder: {$candidate}\n";
+                break;
             }
+        }
+        
+        if ($existingSpamFolder) {
+            // Fix permissions on existing folder
+            exec("chown -R {$username}:{$username} {$existingSpamFolder}");
+            exec("chmod -R g+rwx {$existingSpamFolder}");
+            echo "  ✅ Fixed permissions on existing spam folder: {$existingSpamFolder}\n";
         } else {
-            echo "  ℹ️  Spam folder already exists: {$spamFolder}\n";
+            // Create default spam folder using sudo for proper ownership
+            $spamFolder = $userMaildir . '/.Spam';
+            if (is_dir($userMaildir)) {
+                $createCommands = [
+                    "sudo -u {$username} mkdir -p {$spamFolder}",
+                    "sudo -u {$username} mkdir -p {$spamFolder}/cur",
+                    "sudo -u {$username} mkdir -p {$spamFolder}/new",
+                    "sudo -u {$username} mkdir -p {$spamFolder}/tmp"
+                ];
+                
+                $success = true;
+                foreach ($createCommands as $cmd) {
+                    exec($cmd, $output, $returnCode);
+                    if ($returnCode !== 0) {
+                        $success = false;
+                        break;
+                    }
+                }
+                
+                if ($success) {
+                    exec("chmod -R g+rwx {$spamFolder}");
+                    echo "  ✅ Created spam folder with proper ownership: {$spamFolder}\n";
+                } else {
+                    echo "  ❌ Failed to create spam folder\n";
+                }
+            }
         }
     }
     
