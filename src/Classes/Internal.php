@@ -1026,43 +1026,50 @@ EOF;
     {
         echo "⚙️  Configuring Dovecot Sieve...\n";
         
-        // Enable Sieve in IMAP configuration
-        $imapConfig = '/etc/dovecot/conf.d/20-imap.conf';
-        if (file_exists($imapConfig)) {
-            $content = file_get_contents($imapConfig);
-            if (strpos($content, 'imap_sieve') === false) {
-                // Add sieve to mail_plugins
-                $content = preg_replace(
-                    '/^(\s*mail_plugins\s*=\s*.*?)$/m',
-                    '$1 imap_sieve',
-                    $content
-                );
-                file_put_contents($imapConfig, $content);
-                echo "✅ Enabled Sieve in IMAP configuration\n";
-            }
+        // Create a separate Sieve configuration file instead of modifying existing ones
+        $sieveConfigFile = '/etc/dovecot/conf.d/99-cyford-sieve.conf';
+        
+        if (!file_exists($sieveConfigFile)) {
+            $sieveConfig = <<<'DOVECOT'
+# Cyford Web Armor Sieve Configuration
+# Auto-generated - Safe to remove if not needed
+
+# Enable Sieve plugin for IMAP
+protocol imap {
+  mail_plugins = $mail_plugins imap_sieve
+}
+
+# Enable ManageSieve protocol
+protocol sieve {
+  managesieve_max_line_length = 65536
+}
+
+# ManageSieve service
+service managesieve-login {
+  inet_listener sieve {
+    port = 4190
+  }
+}
+
+# Sieve plugin settings
+plugin {
+  sieve = file:~/sieve;active=~/.dovecot.sieve
+  sieve_global_extensions = +vnd.dovecot.pipe +vnd.dovecot.environment
+}
+DOVECOT;
+            
+            file_put_contents($sieveConfigFile, $sieveConfig);
+            echo "✅ Created Sieve configuration file: {$sieveConfigFile}\n";
+        } else {
+            echo "ℹ️  Sieve configuration already exists\n";
         }
         
-        // Configure ManageSieve
-        $sieveConfig = '/etc/dovecot/conf.d/20-managesieve.conf';
-        if (file_exists($sieveConfig)) {
-            $content = file_get_contents($sieveConfig);
-            // Uncomment ManageSieve service
-            $content = str_replace('#service managesieve-login', 'service managesieve-login', $content);
-            $content = str_replace('#  inet_listener sieve', '  inet_listener sieve', $content);
-            $content = str_replace('#    port = 4190', '    port = 4190', $content);
-            file_put_contents($sieveConfig, $content);
-            echo "✅ Configured ManageSieve service\n";
-        }
-        
-        // Enable Sieve plugin globally
-        $mailConfig = '/etc/dovecot/conf.d/10-mail.conf';
-        if (file_exists($mailConfig)) {
-            $content = file_get_contents($mailConfig);
-            if (strpos($content, 'mail_plugins') === false || strpos($content, 'sieve') === false) {
-                $content .= "\n# Sieve plugin\nmail_plugins = \$mail_plugins sieve\n";
-                file_put_contents($mailConfig, $content);
-                echo "✅ Enabled Sieve plugin globally\n";
-            }
+        // Test configuration before restarting
+        exec('doveconf -n > /dev/null 2>&1', $testOutput, $testReturn);
+        if ($testReturn !== 0) {
+            echo "❌ Dovecot configuration test failed, removing Sieve config\n";
+            unlink($sieveConfigFile);
+            return;
         }
         
         // Restart Dovecot to apply changes
@@ -1070,8 +1077,22 @@ EOF;
         if ($restartReturn === 0) {
             echo "✅ Restarted Dovecot successfully\n";
         } else {
-            echo "⚠️  Dovecot restart may have issues, but continuing...\n";
+            echo "❌ Dovecot restart failed, removing Sieve config\n";
+            unlink($sieveConfigFile);
+            exec('systemctl restart dovecot 2>/dev/null'); // Try to restore
+            return;
         }
+        
+        // Verify Dovecot is running
+        exec('systemctl is-active dovecot 2>/dev/null', $statusOutput, $statusReturn);
+        if ($statusReturn !== 0) {
+            echo "❌ Dovecot failed to start, removing Sieve config\n";
+            unlink($sieveConfigFile);
+            exec('systemctl restart dovecot 2>/dev/null'); // Try to restore
+            return;
+        }
+        
+        echo "✅ Dovecot Sieve configuration completed successfully\n";
         
         // Wait a moment for Dovecot to fully start
         sleep(2);
