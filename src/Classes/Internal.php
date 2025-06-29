@@ -52,6 +52,14 @@ class Internal
                 $this->setupPermissions();
                 break;
                 
+            case 'create-docker':
+                $this->createDockerEnvironment();
+                break;
+                
+            case 'create-user':
+                $this->createUser($args['username'] ?? '', $args['password'] ?? '');
+                break;
+                
             default:
                 $this->showHelp();
         }
@@ -360,6 +368,310 @@ class Internal
     }
 
     /**
+     * Create Docker environment with full mail stack
+     */
+    private function createDockerEnvironment(): void
+    {
+        echo "🐳 Creating Docker environment for Cyford Security...\n";
+        
+        try {
+            // Create Dockerfile
+            $dockerfile = $this->generateDockerfile();
+            file_put_contents('Dockerfile', $dockerfile);
+            echo "✅ Dockerfile created\n";
+            
+            // Create docker-compose.yml
+            $dockerCompose = $this->generateDockerCompose();
+            file_put_contents('docker-compose.yml', $dockerCompose);
+            echo "✅ docker-compose.yml created\n";
+            
+            // Create setup script
+            $setupScript = $this->generateSetupScript();
+            file_put_contents('docker-setup.sh', $setupScript);
+            chmod('docker-setup.sh', 0755);
+            echo "✅ Setup script created\n";
+            
+            echo "\n🚀 Docker environment created successfully!\n";
+            echo "\n📋 Next steps:\n";
+            echo "  1. docker-compose up -d\n";
+            echo "  2. docker exec -it cyford-mail ./docker-setup.sh\n";
+            echo "  3. Access SquirrelMail: http://localhost:8080\n";
+            echo "  4. Create users with: --command=create-user --username=test --password=pass\n";
+            
+        } catch (Exception $e) {
+            echo "❌ Docker environment creation failed: " . $e->getMessage() . "\n";
+        }
+    }
+    
+    /**
+     * Create mail user for Postfix and Dovecot
+     */
+    private function createUser(string $username, string $password): void
+    {
+        if (empty($username) || empty($password)) {
+            echo "❌ Username and password are required\n";
+            echo "Usage: --command=create-user --username=testuser --password=testpass\n";
+            return;
+        }
+        
+        echo "👤 Creating mail user: {$username}\n";
+        
+        try {
+            // 1. Create system user
+            $userExists = exec("id {$username} 2>/dev/null");
+            if (empty($userExists)) {
+                exec("useradd -m -s /bin/bash {$username}");
+                echo "✅ System user created: {$username}\n";
+            } else {
+                echo "ℹ️  System user already exists: {$username}\n";
+            }
+            
+            // 2. Set password
+            exec("echo '{$username}:{$password}' | chpasswd");
+            echo "✅ Password set for user: {$username}\n";
+            
+            // 3. Create maildir structure
+            $maildirTemplate = $this->config['postfix']['spam_handling']['maildir_path'] ?? '/home/{user}/Maildir';
+            $maildir = str_replace('{user}', $username, $maildirTemplate);
+            
+            $maildirDirs = [
+                $maildir,
+                $maildir . '/cur',
+                $maildir . '/new',
+                $maildir . '/tmp',
+                $maildir . '/.Spam',
+                $maildir . '/.Spam/cur',
+                $maildir . '/.Spam/new',
+                $maildir . '/.Spam/tmp'
+            ];
+            
+            foreach ($maildirDirs as $dir) {
+                if (!is_dir($dir)) {
+                    mkdir($dir, 0755, true);
+                }
+            }
+            
+            exec("chown -R {$username}:{$username} {$maildir}");
+            echo "✅ Maildir created: {$maildir}\n";
+            
+            // 4. Add to Postfix virtual users (if using virtual domains)
+            $domain = gethostname() ?: 'localhost';
+            $virtualUsers = "/etc/postfix/virtual_users";
+            $userEntry = "{$username}@{$domain}\t{$username}\n";
+            
+            if (file_exists($virtualUsers)) {
+                file_put_contents($virtualUsers, $userEntry, FILE_APPEND);
+                exec("postmap {$virtualUsers}");
+                echo "✅ Added to Postfix virtual users\n";
+            }
+            
+            // 5. Add to Dovecot users
+            $dovecotUsers = "/etc/dovecot/users";
+            $dovecotEntry = "{$username}@{$domain}:{{{PLAIN}}{$password}::::::\n";
+            
+            if (!file_exists($dovecotUsers)) {
+                touch($dovecotUsers);
+            }
+            
+            file_put_contents($dovecotUsers, $dovecotEntry, FILE_APPEND);
+            echo "✅ Added to Dovecot users\n";
+            
+            // 6. Reload services
+            exec("systemctl reload postfix 2>/dev/null");
+            exec("systemctl reload dovecot 2>/dev/null");
+            
+            echo "\n🎉 User created successfully!\n";
+            echo "\n📧 Email Details:\n";
+            echo "  Email: {$username}@{$domain}\n";
+            echo "  Password: {$password}\n";
+            echo "  Maildir: {$maildir}\n";
+            echo "\n🌐 Access via SquirrelMail or IMAP client\n";
+            
+        } catch (Exception $e) {
+            echo "❌ User creation failed: " . $e->getMessage() . "\n";
+        }
+    }
+    
+    /**
+     * Generate Dockerfile for complete mail stack
+     */
+    private function generateDockerfile(): string
+    {
+        return <<<'EOF'
+# Cyford Security Mail Stack
+FROM ubuntu:22.04
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install all required packages
+RUN apt-get update && apt-get install -y \
+    postfix \
+    dovecot-core \
+    dovecot-imapd \
+    dovecot-pop3d \
+    php8.1 \
+    php8.1-cli \
+    php8.1-sqlite3 \
+    php8.1-curl \
+    apache2 \
+    squirrelmail \
+    fail2ban \
+    iptables \
+    git \
+    curl \
+    wget \
+    nano \
+    supervisor \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create required users
+RUN useradd -r -s /bin/false report-ip
+
+# Create directory structure
+RUN mkdir -p /usr/local/share/cyford/security \
+    && mkdir -p /var/log/cyford-security \
+    && mkdir -p /var/spool/cyford-security
+
+# Copy CLI Security files
+COPY . /usr/local/share/cyford/security/
+
+# Set permissions
+RUN chown -R report-ip:report-ip /usr/local/share/cyford/security \
+    && chown -R report-ip:report-ip /var/log/cyford-security \
+    && chmod -R 755 /usr/local/share/cyford/security
+
+# Configure SquirrelMail
+RUN ln -s /usr/share/squirrelmail /var/www/html/webmail \
+    && chown -R www-data:www-data /var/lib/squirrelmail
+
+# Create supervisor config
+RUN echo '[supervisord]' > /etc/supervisor/conf.d/mailstack.conf \
+    && echo 'nodaemon=true' >> /etc/supervisor/conf.d/mailstack.conf \
+    && echo '' >> /etc/supervisor/conf.d/mailstack.conf \
+    && echo '[program:postfix]' >> /etc/supervisor/conf.d/mailstack.conf \
+    && echo 'command=/usr/sbin/postfix start-fg' >> /etc/supervisor/conf.d/mailstack.conf \
+    && echo 'autorestart=true' >> /etc/supervisor/conf.d/mailstack.conf \
+    && echo '' >> /etc/supervisor/conf.d/mailstack.conf \
+    && echo '[program:dovecot]' >> /etc/supervisor/conf.d/mailstack.conf \
+    && echo 'command=/usr/sbin/dovecot -F' >> /etc/supervisor/conf.d/mailstack.conf \
+    && echo 'autorestart=true' >> /etc/supervisor/conf.d/mailstack.conf \
+    && echo '' >> /etc/supervisor/conf.d/mailstack.conf \
+    && echo '[program:apache2]' >> /etc/supervisor/conf.d/mailstack.conf \
+    && echo 'command=/usr/sbin/apache2ctl -DFOREGROUND' >> /etc/supervisor/conf.d/mailstack.conf \
+    && echo 'autorestart=true' >> /etc/supervisor/conf.d/mailstack.conf
+
+# Expose ports
+EXPOSE 25 110 143 993 995 80
+
+# Start supervisor
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/mailstack.conf"]
+EOF;
+    }
+    
+    /**
+     * Generate docker-compose.yml
+     */
+    private function generateDockerCompose(): string
+    {
+        return <<<'EOF'
+version: '3.8'
+
+services:
+  cyford-mail:
+    build: .
+    container_name: cyford-mail
+    hostname: mail.cyford.local
+    ports:
+      - "25:25"     # SMTP
+      - "110:110"   # POP3
+      - "143:143"   # IMAP
+      - "993:993"   # IMAPS
+      - "995:995"   # POP3S
+      - "8080:80"   # SquirrelMail
+    volumes:
+      - mail_data:/var/mail
+      - mail_logs:/var/log
+      - ./:/usr/local/share/cyford/security
+    environment:
+      - HOSTNAME=mail.cyford.local
+      - DOMAIN=cyford.local
+    privileged: true
+    restart: unless-stopped
+
+volumes:
+  mail_data:
+  mail_logs:
+EOF;
+    }
+    
+    /**
+     * Generate setup script for Docker container
+     */
+    private function generateSetupScript(): string
+    {
+        return <<<'EOF'
+#!/bin/bash
+echo "🚀 Setting up Cyford Security Mail Stack..."
+
+# Setup permissions
+echo "📋 Setting up permissions..."
+cd /usr/local/share/cyford/security
+php index.php --input_type=internal --command=setup-permissions
+
+# Setup database
+echo "🗄️ Setting up database..."
+php index.php --input_type=internal --command=setup-database
+
+# Configure Postfix
+echo "📧 Configuring Postfix..."
+postconf -e "myhostname = mail.cyford.local"
+postconf -e "mydomain = cyford.local"
+postconf -e "myorigin = \$mydomain"
+postconf -e "inet_interfaces = all"
+postconf -e "mydestination = \$myhostname, localhost.\$mydomain, localhost, \$mydomain"
+postconf -e "home_mailbox = Maildir/"
+
+# Configure Dovecot
+echo "📬 Configuring Dovecot..."
+echo "mail_location = maildir:~/Maildir" > /etc/dovecot/conf.d/10-mail.conf
+echo "auth_mechanisms = plain login" > /etc/dovecot/conf.d/10-auth.conf
+echo "passdb {" >> /etc/dovecot/conf.d/10-auth.conf
+echo "  driver = passwd-file" >> /etc/dovecot/conf.d/10-auth.conf
+echo "  args = /etc/dovecot/users" >> /etc/dovecot/conf.d/10-auth.conf
+echo "}" >> /etc/dovecot/conf.d/10-auth.conf
+echo "userdb {" >> /etc/dovecot/conf.d/10-auth.conf
+echo "  driver = passwd" >> /etc/dovecot/conf.d/10-auth.conf
+echo "}" >> /etc/dovecot/conf.d/10-auth.conf
+
+# Configure SquirrelMail
+echo "🌐 Configuring SquirrelMail..."
+echo "<?php" > /etc/squirrelmail/config_local.php
+echo "\$domain = 'cyford.local';" >> /etc/squirrelmail/config_local.php
+echo "\$imapServerAddress = 'localhost';" >> /etc/squirrelmail/config_local.php
+echo "\$imapPort = 143;" >> /etc/squirrelmail/config_local.php
+echo "\$useSendmail = true;" >> /etc/squirrelmail/config_local.php
+echo "\$sendmail_path = '/usr/sbin/sendmail';" >> /etc/squirrelmail/config_local.php
+echo "?>" >> /etc/squirrelmail/config_local.php
+
+# Setup Cyford Security integration
+echo "🛡️ Integrating Cyford Security..."
+php index.php --input_type=postfix --setup
+
+echo "✅ Setup completed!"
+echo ""
+echo "📧 Mail Stack Ready:"
+echo "  - SMTP: localhost:25"
+echo "  - IMAP: localhost:143"
+echo "  - POP3: localhost:110"
+echo "  - SquirrelMail: http://localhost:8080/webmail"
+echo ""
+echo "👤 Create users with:"
+echo "  php index.php --input_type=internal --command=create-user --username=test --password=pass"
+EOF;
+    }
+
+    /**
      * Show help information
      */
     private function showHelp(): void
@@ -371,6 +683,8 @@ class Internal
         echo "Available Commands:\n";
         echo "  setup-database     - Initialize database with proper permissions\n";
         echo "  setup-permissions  - Setup all system permissions for report-ip user\n";
+        echo "  create-docker      - Create Docker environment with full mail stack\n";
+        echo "  create-user        - Create mail user (--username=user --password=pass)\n";
         echo "  test-database      - Test database connection and functionality\n";
         echo "  view-spam-patterns - View spam patterns (--limit=20)\n";
         echo "  clear-spam-pattern - Remove spam pattern (--pattern_id=123)\n";
@@ -380,6 +694,8 @@ class Internal
         echo "  help               - Show this help message\n\n";
         
         echo "Examples:\n";
+        echo "  php index.php --input_type=internal --command=create-docker\n";
+        echo "  php index.php --input_type=internal --command=create-user --username=test --password=pass\n";
         echo "  php index.php --input_type=internal --command=setup-permissions\n";
         echo "  php index.php --input_type=internal --command=setup-database\n";
         echo "  php index.php --input_type=internal --command=stats\n";

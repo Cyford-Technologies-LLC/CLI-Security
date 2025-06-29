@@ -247,51 +247,123 @@ php 'errors' => [ 'report_errors' => 1, ],
 
 ## **Internal Commands**
 
-CLI-Security includes built-in management commands for database setup, monitoring, and maintenance.
+CLI-Security includes comprehensive built-in management commands for setup, monitoring, user management, and Docker deployment.
 
-### **Database Setup (Required)**
+### **System Setup Commands**
 
-Before using hash-based spam detection, initialize the database:
+#### **Complete Permission Setup (Recommended First Step):**
 ```bash
-php /usr/local/share/cyford/security/index.php --input_type=internal --command=setup-database
+# Setup all system permissions, sudoers rules, and directory structure
+php index.php --input_type=internal --command=setup-permissions
 ```
 
-### **Available Commands**
+**What setup-permissions does:**
+- ✅ Creates sudoers rule for report-ip user
+- ✅ Sets up log directories with proper permissions
+- ✅ Configures database directory and permissions
+- ✅ Initializes whitelist/blacklist files
+- ✅ Sets project directory permissions
 
-#### **Database Management:**
+#### **Database Setup:**
 ```bash
-# Setup database with proper permissions
+# Initialize database with proper permissions (run after setup-permissions)
 php index.php --input_type=internal --command=setup-database
 
 # Test database connectivity
 php index.php --input_type=internal --command=test-database
 ```
 
-#### **Spam Pattern Management:**
+### **Docker Environment Commands**
+
+#### **Create Complete Docker Mail Stack:**
 ```bash
-# View spam patterns (limit results)
+# Generate Dockerfile, docker-compose.yml, and setup scripts
+php index.php --input_type=internal --command=create-docker
+```
+
+**Creates:**
+- 🐳 **Dockerfile** - Ubuntu with Postfix, Dovecot, PHP, SquirrelMail
+- 🐳 **docker-compose.yml** - Service orchestration
+- 🐳 **docker-setup.sh** - Automated configuration script
+
+### **User Management Commands**
+
+#### **Create Mail Users:**
+```bash
+# Create new mail user with system account and maildir
+php index.php --input_type=internal --command=create-user --username=testuser --password=securepass
+```
+
+**User creation includes:**
+- 👤 System user account creation
+- 📧 Postfix virtual user configuration
+- 📬 Dovecot authentication setup
+- 📁 Maildir structure with Spam folder
+- 🔐 Proper permissions and ownership
+
+### **Spam Pattern Management**
+
+#### **View and Manage Spam Patterns:**
+```bash
+# View recent spam patterns
 php index.php --input_type=internal --command=view-spam-patterns --limit=20
 
 # Remove specific spam pattern
 php index.php --input_type=internal --command=clear-spam-pattern --pattern_id=123
 ```
 
-#### **System Monitoring:**
+### **System Monitoring**
+
+#### **Statistics and System Health:**
 ```bash
-# Show system statistics
+# Show comprehensive system statistics
 php index.php --input_type=internal --command=stats
 
 # Reload whitelist/blacklist files
 php index.php --input_type=internal --command=reload-lists
 ```
 
-#### **Testing Tools:**
+### **Testing and Debugging Tools**
+
+#### **Spam Filter Testing:**
 ```bash
 # Test spam filter with sample content
 php index.php --input_type=internal --command=test-spam-filter --subject="Hello" --body="Test message"
 
 # Show all available commands
 php index.php --input_type=internal --command=help
+```
+
+### **Complete Setup Workflow**
+
+#### **For Production Deployment:**
+```bash
+# 1. Setup all permissions and directories
+php index.php --input_type=internal --command=setup-permissions
+
+# 2. Initialize database
+php index.php --input_type=internal --command=setup-database
+
+# 3. Create mail users
+php index.php --input_type=internal --command=create-user --username=admin --password=securepass
+
+# 4. Test system
+php index.php --input_type=internal --command=stats
+```
+
+#### **For Docker Development:**
+```bash
+# 1. Create Docker environment
+php index.php --input_type=internal --command=create-docker
+
+# 2. Start services
+docker-compose up -d
+
+# 3. Setup inside container
+docker exec -it cyford-mail ./docker-setup.sh
+
+# 4. Create test users
+docker exec -it cyford-mail php /usr/local/share/cyford/security/index.php --input_type=internal --command=create-user --username=test --password=test123
 ```
 
 ### **Hash-Based Spam Detection**
@@ -311,6 +383,104 @@ The system includes advanced hash-based spam detection that:
 ```
 
 **Note:** Run `setup-database` command first to initialize the SQLite database with proper permissions.
+
+---
+
+## **Docker Environment**
+
+CLI-Security includes a complete Docker-based mail server environment for testing and development.
+
+### **Quick Start with Docker**
+
+#### **1. Create Docker Environment:**
+```bash
+php index.php --input_type=internal --command=create-docker
+```
+
+#### **2. Start Services:**
+```bash
+docker-compose up -d
+```
+
+#### **3. Setup Mail Stack:**
+```bash
+docker exec -it cyford-mail ./docker-setup.sh
+```
+
+#### **4. Access Services:**
+- **SquirrelMail (Webmail):** http://localhost:8080/webmail
+- **SMTP Server:** localhost:25
+- **IMAP Server:** localhost:143
+- **POP3 Server:** localhost:110
+
+### **Included Services**
+
+- **📧 Postfix** - SMTP server with Cyford Security integration
+- **📬 Dovecot** - IMAP/POP3 server for email retrieval
+- **🌐 SquirrelMail** - Web-based email client
+- **🔒 Cyford Security** - Advanced spam filtering and protection
+- **🛡️ Fail2Ban** - Intrusion prevention system
+- **🐘 PHP 8.1** - With SQLite support for database operations
+
+### **Docker Features**
+
+- **One-Command Setup** - Complete mail server in minutes
+- **Pre-configured Services** - All components work together seamlessly
+- **Persistent Storage** - Email data survives container restarts
+- **Web Interface** - Easy email testing via SquirrelMail
+- **Development Ready** - Perfect for testing spam filters and mail flows
+
+---
+
+## **User Management**
+
+CLI-Security provides built-in user management for mail servers with integrated Postfix and Dovecot support.
+
+### **Create Mail Users**
+
+```bash
+# Create a new mail user
+php index.php --input_type=internal --command=create-user --username=testuser --password=securepass
+```
+
+### **What User Creation Does**
+
+1. **✅ Creates System User** - Linux user account with home directory
+2. **✅ Sets Password** - For both system and email authentication
+3. **✅ Creates Maildir Structure** - Including Spam quarantine folder
+4. **✅ Configures Postfix** - Adds user to virtual user mapping
+5. **✅ Configures Dovecot** - Sets up IMAP/POP3 authentication
+6. **✅ Sets Permissions** - Proper ownership for mail directories
+
+### **User Features**
+
+- **📧 Email Account** - Full SMTP/IMAP/POP3 access
+- **🗂️ Spam Folder** - Quarantined emails accessible via email client
+- **🔐 Secure Authentication** - Encrypted password storage
+- **📱 Multi-Client Support** - Works with any email client
+- **🌐 Webmail Access** - Login via SquirrelMail interface
+
+### **Example Usage**
+
+```bash
+# Create test user
+php index.php --input_type=internal --command=create-user --username=john --password=mypassword
+
+# User can now:
+# - Send/receive emails: john@yourdomain.com
+# - Access via IMAP: john / mypassword
+# - Login to webmail: http://localhost:8080/webmail
+# - View spam folder in email client
+```
+
+### **Coming Soon**
+
+- **User Deletion** - Remove users and clean up mail data
+- **Password Reset** - Change user passwords
+- **Quota Management** - Set mailbox size limits
+- **Alias Management** - Create email aliases and forwards
+- **Bulk User Import** - CSV-based user creation
+- **User Statistics** - Mail usage and spam statistics per user
 
 ---
 
