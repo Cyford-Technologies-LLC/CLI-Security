@@ -1042,6 +1042,15 @@ EOF;
             echo "⚠️  Sieve plugin may not work properly\n";
         }
         
+        // Check version compatibility
+        exec('dovecot --version 2>/dev/null', $dovecotVersion);
+        exec('rpm -q dovecot-pigeonhole 2>/dev/null', $pigeonholeVersion);
+        
+        if (!empty($dovecotVersion) && !empty($pigeonholeVersion)) {
+            echo "ℹ️  Dovecot version: " . implode(' ', $dovecotVersion) . "\n";
+            echo "ℹ️  Pigeonhole version: " . implode(' ', $pigeonholeVersion) . "\n";
+        }
+        
         // Configure Dovecot for Sieve
         $this->configureDovecotSieve();
         
@@ -1078,16 +1087,22 @@ service managesieve-login {
   inet_listener sieve {
     port = 4190
   }
+  service_count = 1
+  process_min_avail = 0
+  vsz_limit = 64M
 }
 
 service managesieve {
+  process_limit = 1024
 }
 
 # Sieve plugin settings
 plugin {
   sieve = file:~/sieve;active=~/.dovecot.sieve
-  sieve_default = /var/lib/dovecot/sieve/default.sieve
   sieve_dir = ~/sieve
+  sieve_max_script_size = 1M
+  sieve_max_actions = 32
+  sieve_max_redirects = 4
 }
 DOVECOT;
             
