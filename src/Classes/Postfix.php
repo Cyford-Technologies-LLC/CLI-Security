@@ -261,7 +261,7 @@ class Postfix
             // Log detailed spam information
             $this->logSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
             
-            $this->handleSpamEmail($emailData, $headers, $recipient, $logger);
+            $this->handleSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
             return;
         }
 
@@ -727,7 +727,7 @@ EOF;
     /**
      * Handle spam email according to configuration
      */
-    private function handleSpamEmail(string $emailData, array $headers, string $recipient, $logger): void
+    private function handleSpamEmail(string $emailData, array $headers, string $recipient, string $spamReason, $logger): void
     {
         global $config;
         $spamAction = $config['postfix']['spam_handling']['action'] ?? 'reject';

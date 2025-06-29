@@ -314,6 +314,19 @@ php index.php --input_type=internal --command=setup-user-permissions --username=
 - 📧 Creates spam folder with proper permissions
 - ✅ Enables user maildir quarantine method
 
+#### **Setup Dovecot Sieve Spam Rules:**
+```bash
+# Configure automatic spam filtering rules for users
+php index.php --input_type=internal --command=setup-sieve-rules --username=testuser
+```
+
+**Sieve rules setup includes:**
+- 📧 Creates Dovecot Sieve spam filtering rules
+- 🔄 Automatically moves X-Spam flagged emails to Spambox
+- 📁 Creates spam folders if they don't exist
+- ✅ Compiles and activates Sieve scripts
+- 🔄 Reloads Dovecot configuration
+
 ### **Spam Pattern Management**
 
 #### **View and Manage Spam Patterns:**
@@ -363,7 +376,10 @@ php index.php --input_type=internal --command=create-user --username=admin --pas
 # 4. Setup user directory permissions (for user_maildir quarantine)
 php index.php --input_type=internal --command=setup-user-permissions --username=admin
 
-# 5. Test system
+# 5. Setup Dovecot Sieve spam filtering rules
+php index.php --input_type=internal --command=setup-sieve-rules --username=admin
+
+# 6. Test system
 php index.php --input_type=internal --command=stats
 ```
 
@@ -399,6 +415,40 @@ The system includes advanced hash-based spam detection that:
 ```
 
 **Note:** Run `setup-database` command first to initialize the SQLite database with proper permissions.
+
+### **X-Spam Headers (Default Method)**
+
+CLI-Security now uses **X-Spam headers** as the default spam handling method, following industry standards like SpamAssassin.
+
+#### **How X-Spam Headers Work:**
+```php
+'spam_handling' => [
+    'action' => 'headers', // Adds X-Spam headers instead of quarantining
+],
+```
+
+**Headers Added to Spam Emails:**
+```
+X-Spam-Flag: YES
+X-Spam-Checker-Version: Cyford Web Armor 1.0
+X-Spam-Level: ****
+X-Spam-Score: 7.0
+X-Spam-Status: Yes, score=7.0 required=5.0 tests=CYFORD_SPAM
+Subject: ***SPAM*** Original Subject
+```
+
+**Benefits:**
+- ✅ **No Permission Issues** - No file system operations required
+- ✅ **Standard Approach** - Compatible with all email clients and servers
+- ✅ **User Control** - Users can configure their own spam handling rules
+- ✅ **Dovecot Integration** - Works seamlessly with Sieve filtering rules
+- ✅ **Chroot Compatible** - Works in restricted Postfix environments
+
+**Setup Automatic Spam Filtering:**
+```bash
+# Setup Sieve rules to automatically move spam to spam folder
+php index.php --input_type=internal --command=setup-sieve-rules --username=all
+```
 
 ### **Quarantine Configuration**
 

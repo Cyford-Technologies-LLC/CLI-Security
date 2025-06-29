@@ -1184,6 +1184,8 @@ SIEVE;
         echo "  php index.php --input_type=internal --command=create-docker\n";
         echo "  php index.php --input_type=internal --command=create-user --username=test --password=pass\n";
         echo "  php index.php --input_type=internal --command=setup-permissions\n";
+        echo "  php index.php --input_type=internal --command=setup-user-permissions --username=all\n";
+        echo "  php index.php --input_type=internal --command=setup-sieve-rules --username=all\n";
         echo "  php index.php --input_type=internal --command=setup-database\n";
         echo "  php index.php --input_type=internal --command=stats\n";
         echo "  php index.php --input_type=internal --command=test-spam-filter --subject='Hello' --body='Test message'\n";
