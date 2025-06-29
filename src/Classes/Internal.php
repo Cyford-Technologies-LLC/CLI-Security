@@ -60,6 +60,10 @@ class Internal
                 $this->createUser($args['username'] ?? '', $args['password'] ?? '');
                 break;
                 
+            case 'setup-user-permissions':
+                $this->setupUserPermissions($args['username'] ?? '');
+                break;
+                
             default:
                 $this->showHelp();
         }
@@ -672,6 +676,68 @@ EOF;
     }
 
     /**
+     * Setup user directory permissions for postfix access
+     */
+    private function setupUserPermissions(string $username): void
+    {
+        if (empty($username)) {
+            echo "❌ Username is required\n";
+            echo "Usage: --command=setup-user-permissions --username=allen\n";
+            return;
+        }
+        
+        echo "🔧 Setting up user directory permissions for: {$username}\n";
+        
+        try {
+            // Get maildir path from config
+            $maildirTemplate = $this->config['postfix']['spam_handling']['maildir_path'] ?? '/home/{user}/Maildir';
+            $userMaildir = str_replace('{user}', $username, $maildirTemplate);
+            
+            // Add postfix user to user's group
+            exec("usermod -a -G {$username} postfix");
+            echo "✅ Added postfix user to {$username} group\n";
+            
+            // Set group permissions on user's home directory
+            exec("chmod g+rx /home/{$username}");
+            echo "✅ Set group read/execute on /home/{$username}\n";
+            
+            // Set group permissions on maildir
+            if (is_dir($userMaildir)) {
+                exec("chmod -R g+rwx {$userMaildir}");
+                exec("chgrp -R {$username} {$userMaildir}");
+                echo "✅ Set group permissions on {$userMaildir}\n";
+            } else {
+                echo "ℹ️  Maildir {$userMaildir} doesn't exist yet\n";
+            }
+            
+            // Create spam folder with proper permissions
+            $spamFolder = $userMaildir . '/.Spam';
+            if (!is_dir($spamFolder)) {
+                mkdir($spamFolder, 0775, true);
+                mkdir($spamFolder . '/cur', 0775, true);
+                mkdir($spamFolder . '/new', 0775, true);
+                mkdir($spamFolder . '/tmp', 0775, true);
+                
+                exec("chgrp -R {$username} {$spamFolder}");
+                exec("chmod -R g+rwx {$spamFolder}");
+                echo "✅ Created spam folder with group permissions: {$spamFolder}\n";
+            }
+            
+            echo "\n🎉 User permissions setup completed!\n";
+            echo "\n📧 Configuration:\n";
+            echo "  - Postfix user added to {$username} group\n";
+            echo "  - Group permissions set on home directory\n";
+            echo "  - Maildir accessible to postfix group\n";
+            echo "  - Spam folder ready for quarantine\n";
+            echo "\n⚙️  Update config.php to use user_maildir method:\n";
+            echo "  'quarantine_method' => 'user_maildir'\n";
+            
+        } catch (Exception $e) {
+            echo "❌ User permission setup failed: " . $e->getMessage() . "\n";
+        }
+    }
+
+    /**
      * Show help information
      */
     private function showHelp(): void
@@ -685,6 +751,7 @@ EOF;
         echo "  setup-permissions  - Setup all system permissions for report-ip user\n";
         echo "  create-docker      - Create Docker environment with full mail stack\n";
         echo "  create-user        - Create mail user (--username=user --password=pass)\n";
+        echo "  setup-user-permissions - Setup user directory permissions for postfix (--username=user)\n";
         echo "  test-database      - Test database connection and functionality\n";
         echo "  view-spam-patterns - View spam patterns (--limit=20)\n";
         echo "  clear-spam-pattern - Remove spam pattern (--pattern_id=123)\n";

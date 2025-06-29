@@ -803,32 +803,51 @@ EOF;
         
         $logger->info("Resolved {$recipient} to real user: {$realUser}");
         
-        // Get user's maildir path from config
+        // Get quarantine method from config
         global $config;
-        $maildirTemplate = $config['postfix']['spam_handling']['maildir_path'] ?? '/home/{user}/Maildir';
-        $userMaildir = str_replace('{user}', $realUser, $maildirTemplate);
-        $maildirPath = "{$userMaildir}/.{$spamFolder}";
+        $quarantineMethod = $config['postfix']['spam_handling']['quarantine_method'] ?? 'user_maildir';
         
-        // Create spam folder if it doesn't exist
-        if (!is_dir($maildirPath)) {
-            mkdir($maildirPath, 0755, true);
-            mkdir($maildirPath . '/cur', 0755, true);
-            mkdir($maildirPath . '/new', 0755, true);
-            mkdir($maildirPath . '/tmp', 0755, true);
+        if ($quarantineMethod === 'user_maildir') {
+            // Use user's maildir (requires proper permissions)
+            $maildirTemplate = $config['postfix']['spam_handling']['maildir_path'] ?? '/home/{user}/Maildir';
+            $userMaildir = str_replace('{user}', $realUser, $maildirTemplate);
+            $maildirPath = "{$userMaildir}/.{$spamFolder}";
             
-            // Set proper ownership
-            exec("chown -R {$realUser}:{$realUser} {$maildirPath}");
-            $logger->info("Created spam folder: {$maildirPath}");
+            // Create spam folder if it doesn't exist
+            if (!is_dir($maildirPath)) {
+                if (mkdir($maildirPath, 0755, true) &&
+                    mkdir($maildirPath . '/cur', 0755, true) &&
+                    mkdir($maildirPath . '/new', 0755, true) &&
+                    mkdir($maildirPath . '/tmp', 0755, true)) {
+                    $logger->info("Created user maildir spam folder: {$maildirPath}");
+                } else {
+                    $logger->error("Failed to create user maildir spam folder: {$maildirPath}");
+                    throw new \RuntimeException("Quarantine failed - cannot create spam folder");
+                }
+            }
+            $spamFile = $maildirPath . '/new/';
+        } else {
+            // Use system quarantine (chroot compatible)
+            $systemQuarantinePath = $config['postfix']['spam_handling']['system_quarantine_path'] ?? '/var/spool/postfix/quarantine';
+            $userSpamPath = $systemQuarantinePath . '/' . $realUser;
+            
+            // Create spam storage if it doesn't exist
+            if (!is_dir($userSpamPath)) {
+                if (!mkdir($userSpamPath, 0755, true)) {
+                    $logger->error("Failed to create system quarantine folder: {$userSpamPath}");
+                    throw new \RuntimeException("Quarantine failed - cannot create spam folder");
+                }
+                $logger->info("Created system quarantine folder: {$userSpamPath}");
+            }
+            $spamFile = $userSpamPath . '/';
         }
         
-        // Save email to spam folder
+        // Save email to determined spam location
         $filename = time() . '.' . uniqid() . '.spam';
-        $spamFile = $maildirPath . '/new/' . $filename;
+        $fullSpamFile = $spamFile . $filename;
         
-        if (file_put_contents($spamFile, $emailData)) {
-            // Set proper ownership
-            exec("chown {$realUser}:{$realUser} {$spamFile}");
-            $logger->info("Spam email quarantined to: {$spamFile}");
+        if (file_put_contents($fullSpamFile, $emailData)) {
+            $logger->info("Spam email quarantined to: {$fullSpamFile} (method: {$quarantineMethod})");
         } else {
             $logger->error("Failed to quarantine spam email. Rejecting instead.");
             throw new \RuntimeException("Quarantine failed");
