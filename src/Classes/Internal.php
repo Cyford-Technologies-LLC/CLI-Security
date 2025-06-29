@@ -1099,7 +1099,37 @@ EOF;
     {
         echo "⚙️  Configuring Dovecot Sieve...\n";
         
-        // Create a separate Sieve configuration file instead of modifying existing ones
+        // Enable ManageSieve protocol in main dovecot.conf
+        $dovecotConf = '/etc/dovecot/dovecot.conf';
+        if (file_exists($dovecotConf)) {
+            $content = file_get_contents($dovecotConf);
+            if (strpos($content, 'protocols') !== false) {
+                // Add sieve to protocols if not already there
+                if (strpos($content, 'sieve') === false) {
+                    $content = preg_replace('/^(#?protocols\s*=.*?)$/m', '$1 sieve', $content);
+                    $content = str_replace('#protocols', 'protocols', $content);
+                    file_put_contents($dovecotConf, $content);
+                    echo "✅ Enabled sieve protocol in dovecot.conf\n";
+                }
+            }
+        }
+        
+        // Enable ManageSieve service in 20-managesieve.conf
+        $managesieveConf = '/etc/dovecot/conf.d/20-managesieve.conf';
+        if (file_exists($managesieveConf)) {
+            $content = file_get_contents($managesieveConf);
+            
+            // Uncomment ManageSieve service configuration
+            $content = str_replace('#service managesieve-login', 'service managesieve-login', $content);
+            $content = str_replace('#  inet_listener sieve', '  inet_listener sieve', $content);
+            $content = str_replace('#    port = 4190', '    port = 4190', $content);
+            $content = preg_replace('/#(\s*})/', '$1', $content); // Uncomment closing braces
+            
+            file_put_contents($managesieveConf, $content);
+            echo "✅ Enabled ManageSieve service in 20-managesieve.conf\n";
+        }
+        
+        // Create Sieve configuration file
         $sieveConfigFile = '/etc/dovecot/conf.d/99-cyford-sieve.conf';
         
         if (!file_exists($sieveConfigFile)) {
@@ -1109,31 +1139,26 @@ EOF;
 
 # CRITICAL: Explicitly override IMAP to NOT load sieve plugin
 protocol imap {
-  # Force IMAP to not load sieve - override any global setting
   mail_plugins = 
 }
 
-# Enable Sieve plugin ONLY for LDA (Local Delivery Agent)
+# Enable Sieve plugin for LDA (Local Delivery Agent)
 protocol lda {
-  mail_plugins = sieve
+  mail_plugins = $mail_plugins sieve
 }
 
-# Enable Sieve plugin ONLY for LMTP
+# Enable Sieve plugin for LMTP
 protocol lmtp {
-  mail_plugins = sieve
+  mail_plugins = $mail_plugins sieve
 }
 
-# ManageSieve service for remote sieve management
-service managesieve-login {
-  inet_listener sieve {
-    port = 4190
-  }
-}
-
-# Sieve plugin settings (only active for LDA/LMTP)
+# Sieve plugin settings
 plugin {
   sieve = ~/.dovecot.sieve
   sieve_dir = ~/sieve
+  sieve_max_script_size = 1M
+  sieve_max_actions = 32
+  sieve_max_redirects = 4
 }
 DOVECOT;
             
@@ -1146,7 +1171,7 @@ DOVECOT;
         // Test configuration before restarting
         exec('doveconf -n > /dev/null 2>&1', $testOutput, $testReturn);
         if ($testReturn !== 0) {
-            echo "❌ Dovecot configuration test failed, removing Sieve config\n";
+            echo "❌ Dovecot configuration test failed, rolling back changes\n";
             unlink($sieveConfigFile);
             return;
         }
@@ -1156,25 +1181,32 @@ DOVECOT;
         if ($restartReturn === 0) {
             echo "✅ Restarted Dovecot successfully\n";
         } else {
-            echo "❌ Dovecot restart failed, removing Sieve config\n";
+            echo "❌ Dovecot restart failed, rolling back changes\n";
             unlink($sieveConfigFile);
-            exec('systemctl restart dovecot 2>/dev/null'); // Try to restore
+            exec('systemctl restart dovecot 2>/dev/null');
             return;
         }
         
-        // Verify Dovecot is running
+        // Verify Dovecot is running without errors
+        sleep(2);
         exec('systemctl is-active dovecot 2>/dev/null', $statusOutput, $statusReturn);
         if ($statusReturn !== 0) {
-            echo "❌ Dovecot failed to start, removing Sieve config\n";
+            echo "❌ Dovecot failed to start properly, rolling back changes\n";
             unlink($sieveConfigFile);
-            exec('systemctl restart dovecot 2>/dev/null'); // Try to restore
+            exec('systemctl restart dovecot 2>/dev/null');
+            return;
+        }
+        
+        // Test for IMAP sieve loading errors
+        exec('journalctl -u dovecot --since "1 minute ago" | grep -i "sieve.*symbol" 2>/dev/null', $errorCheck);
+        if (!empty($errorCheck)) {
+            echo "❌ Detected sieve symbol errors, rolling back changes\n";
+            unlink($sieveConfigFile);
+            exec('systemctl restart dovecot 2>/dev/null');
             return;
         }
         
         echo "✅ Dovecot Sieve configuration completed successfully\n";
-        
-        // Wait a moment for Dovecot to fully start
-        sleep(2);
     }
 
     /**
