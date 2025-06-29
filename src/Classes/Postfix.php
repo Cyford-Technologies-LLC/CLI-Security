@@ -754,7 +754,7 @@ EOF;
     }
 
     /**
-     * Bounce spam email back to sender
+     * Bounce spam email back to sender using Postfix smart host
      */
     private function bounceSpamEmail(array $headers, $logger): void
     {
@@ -764,18 +764,23 @@ EOF;
         
         $logger->info("Bouncing spam email from: {$from}");
         
+        // Extract sender email from From header
+        $senderEmail = $this->extractEmailAddress($from);
+        if (empty($senderEmail)) {
+            $logger->warning("Cannot bounce - invalid sender email: {$from}");
+            return;
+        }
+        
         // Create bounce message
         $bounceEmail = $this->createBounceMessage($headers, $bounceMessage);
         
-        // Send bounce via sendmail
-        $tempFile = tempnam('/tmp', 'bounce_');
-        file_put_contents($tempFile, $bounceEmail);
-        
-        $command = "/usr/sbin/sendmail -t < {$tempFile}";
-        shell_exec($command);
-        
-        unlink($tempFile);
-        $logger->info("Bounce message sent to sender.");
+        // Use Postfix's requeue method (which uses smart host) instead of direct sendmail
+        try {
+            $this->requeueEmail($bounceEmail, $senderEmail, $logger);
+            $logger->info("Bounce message sent via smart host to: {$senderEmail}");
+        } catch (Exception $e) {
+            $logger->error("Failed to send bounce via smart host: " . $e->getMessage());
+        }
     }
 
     /**
@@ -801,24 +806,45 @@ EOF;
         // Get user's home directory and maildir path
         $maildirPath = "/home/{$realUser}/Maildir/.{$spamFolder}";
         
-        // Create spam folder if it doesn't exist
+        // Create spam folder if it doesn't exist (using sudo to create as correct user)
         if (!is_dir($maildirPath)) {
-            mkdir($maildirPath, 0755, true);
-            mkdir($maildirPath . '/cur', 0755, true);
-            mkdir($maildirPath . '/new', 0755, true);
-            mkdir($maildirPath . '/tmp', 0755, true);
+            $commands = [
+                "sudo -u {$realUser} mkdir -p {$maildirPath}",
+                "sudo -u {$realUser} mkdir -p {$maildirPath}/cur",
+                "sudo -u {$realUser} mkdir -p {$maildirPath}/new",
+                "sudo -u {$realUser} mkdir -p {$maildirPath}/tmp"
+            ];
+            
+            foreach ($commands as $cmd) {
+                exec($cmd, $output, $returnCode);
+                if ($returnCode !== 0) {
+                    $logger->error("Failed to create spam folder with command: {$cmd}");
+                    throw new \RuntimeException("Cannot create spam folder for user {$realUser}");
+                }
+            }
             $logger->info("Created spam folder: {$maildirPath}");
         }
         
-        // Save email to spam folder
+        // Save email to spam folder using proper user permissions
         $filename = time() . '.' . uniqid() . '.spam';
         $spamFile = $maildirPath . '/new/' . $filename;
+        $tempFile = '/tmp/' . $filename;
         
-        if (file_put_contents($spamFile, $emailData)) {
-            $logger->info("Spam email quarantined to: {$spamFile}");
+        // Write to temp file first, then move with proper ownership
+        if (file_put_contents($tempFile, $emailData)) {
+            $moveCmd = "sudo -u {$realUser} mv {$tempFile} {$spamFile}";
+            exec($moveCmd, $output, $returnCode);
+            
+            if ($returnCode === 0) {
+                $logger->info("Spam email quarantined to: {$spamFile}");
+            } else {
+                $logger->error("Failed to move spam email to quarantine folder.");
+                unlink($tempFile); // Clean up temp file
+                throw new \RuntimeException("Quarantine failed");
+            }
         } else {
-            $logger->error("Failed to quarantine spam email. Rejecting instead.");
-            $this->bounceSpamEmail([], $logger);
+            $logger->error("Failed to write spam email to temp file.");
+            throw new \RuntimeException("Quarantine failed");
         }
     }
 
