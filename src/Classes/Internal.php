@@ -784,18 +784,39 @@ EOF;
         $userMaildir = str_replace('{user}', $username, $maildirTemplate);
         
         // Add postfix and report-ip users to user's group
-        exec("usermod -a -G {$username} postfix 2>/dev/null", $output, $returnCode);
+        exec("usermod -a -G {$username} postfix 2>&1", $output, $returnCode);
         if ($returnCode === 0) {
             echo "  ✅ Added postfix user to {$username} group\n";
         } else {
-            echo "  ℹ️  Could not add postfix to {$username} group (user may not exist)\n";
+            echo "  ❌ Failed to add postfix to {$username} group: " . implode(' ', $output) . "\n";
         }
         
-        exec("usermod -a -G {$username} report-ip 2>/dev/null", $output, $returnCode);
-        if ($returnCode === 0) {
+        exec("usermod -a -G {$username} report-ip 2>&1", $output2, $returnCode2);
+        if ($returnCode2 === 0) {
             echo "  ✅ Added report-ip user to {$username} group\n";
         } else {
-            echo "  ℹ️  Could not add report-ip to {$username} group\n";
+            echo "  ❌ Failed to add report-ip to {$username} group: " . implode(' ', $output2) . "\n";
+        }
+        
+        // Verify group memberships
+        exec("groups postfix", $postfixGroups);
+        exec("groups report-ip", $reportIpGroups);
+        
+        $postfixGroupsStr = implode(' ', $postfixGroups);
+        $reportIpGroupsStr = implode(' ', $reportIpGroups);
+        
+        if (strpos($postfixGroupsStr, $username) !== false) {
+            echo "  ✅ Verified: postfix is in {$username} group\n";
+        } else {
+            echo "  ❌ Warning: postfix not found in {$username} group\n";
+            echo "  📝 postfix groups: {$postfixGroupsStr}\n";
+        }
+        
+        if (strpos($reportIpGroupsStr, $username) !== false) {
+            echo "  ✅ Verified: report-ip is in {$username} group\n";
+        } else {
+            echo "  ❌ Warning: report-ip not found in {$username} group\n";
+            echo "  📝 report-ip groups: {$reportIpGroupsStr}\n";
         }
         
         // Set group permissions on user's home directory
