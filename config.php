@@ -41,7 +41,7 @@ return [
             'add_footer' => true, // Add spam filter footer to clean emails
             'footer_text' => '\n\n--- This email has been scanned by Cyford Web Armor ---',
             'spam_log_file' => '/var/log/cyford-security/spam.log', // Detailed spam log with raw emails
-            'hash_detection' => false, // Temporarily disable hash-based detection
+            'hash_detection' => true, // Enable hash-based detection (database is now set up)
             'hash_threshold' => 3, // Block after X identical emails
         ],
         'whitelist' => [
