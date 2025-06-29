@@ -64,6 +64,10 @@ class Internal
                 $this->setupUserPermissions($args['username'] ?? '');
                 break;
                 
+            case 'setup-sieve-rules':
+                $this->setupSieveRules($args['username'] ?? '');
+                break;
+                
             default:
                 $this->showHelp();
         }
@@ -930,6 +934,229 @@ EOF;
     }
 
     /**
+     * Setup Sieve rules for spam filtering
+     */
+    private function setupSieveRules(string $username): void
+    {
+        if (empty($username)) {
+            echo "❌ Username is required\n";
+            echo "Usage: --command=setup-sieve-rules --username=allen\n";
+            echo "       --command=setup-sieve-rules --username=all\n";
+            return;
+        }
+        
+        if ($username === 'all') {
+            $this->setupSieveRulesForAllUsers();
+            return;
+        }
+        
+        echo "📧 Setting up Sieve spam filtering rules for: {$username}\n";
+        
+        try {
+            $this->setupSingleUserSieveRules($username);
+            echo "\n🎉 Sieve rules setup completed for {$username}!\n";
+        } catch (Exception $e) {
+            echo "❌ Sieve rules setup failed: " . $e->getMessage() . "\n";
+        }
+    }
+    
+    /**
+     * Setup Sieve rules for all users
+     */
+    private function setupSieveRulesForAllUsers(): void
+    {
+        echo "📧 Setting up Sieve spam filtering rules for ALL users...\n";
+        
+        // Get all users from /home directory
+        $homeDir = '/home';
+        if (!is_dir($homeDir)) {
+            echo "❌ /home directory does not exist\n";
+            return;
+        }
+        
+        $users = [];
+        $directories = scandir($homeDir);
+        
+        foreach ($directories as $dir) {
+            if ($dir === '.' || $dir === '..') continue;
+            
+            $userPath = $homeDir . '/' . $dir;
+            if (is_dir($userPath) && $this->isValidUserDirectory($userPath)) {
+                $users[] = $dir;
+            }
+        }
+        
+        if (empty($users)) {
+            echo "ℹ️  No valid user directories found in /home\n";
+            return;
+        }
+        
+        echo "👥 Found " . count($users) . " users: " . implode(', ', $users) . "\n\n";
+        
+        $successCount = 0;
+        $failCount = 0;
+        
+        foreach ($users as $user) {
+            echo "📧 Processing user: {$user}\n";
+            
+            try {
+                $this->setupSingleUserSieveRules($user);
+                echo "✅ {$user}: SUCCESS\n";
+                $successCount++;
+            } catch (Exception $e) {
+                echo "❌ {$user}: FAILED - " . $e->getMessage() . "\n";
+                $failCount++;
+            }
+            
+            echo "\n";
+        }
+        
+        echo "🎉 Bulk Sieve rules setup completed!\n";
+        echo "\n📊 Summary:\n";
+        echo "  ✅ Successful: {$successCount} users\n";
+        echo "  ❌ Failed: {$failCount} users\n";
+        echo "  📊 Total: " . count($users) . " users\n";
+    }
+    
+    /**
+     * Setup Sieve rules for a single user
+     */
+    private function setupSingleUserSieveRules(string $username): void
+    {
+        // Check if user exists
+        exec("id {$username} 2>/dev/null", $output, $returnCode);
+        if ($returnCode !== 0) {
+            throw new Exception("User {$username} does not exist");
+        }
+        
+        // Get user's home directory
+        $homeDir = "/home/{$username}";
+        if (!is_dir($homeDir)) {
+            throw new Exception("Home directory {$homeDir} does not exist");
+        }
+        
+        // Create sieve directory if it doesn't exist
+        $sieveDir = "{$homeDir}/.dovecot.sieve.d";
+        if (!is_dir($sieveDir)) {
+            exec("sudo -u {$username} mkdir -p {$sieveDir}");
+            echo "  📁 Created sieve directory: {$sieveDir}\n";
+        }
+        
+        // Path to main sieve script
+        $sieveScript = "{$homeDir}/.dovecot.sieve";
+        $spamSieveScript = "{$sieveDir}/spam-filter.sieve";
+        
+        // Create spam filtering sieve script
+        $spamRules = $this->generateSpamSieveRules();
+        
+        if (file_exists($spamSieveScript)) {
+            $existingContent = file_get_contents($spamSieveScript);
+            if (strpos($existingContent, 'X-Spam-Flag') !== false) {
+                echo "  ℹ️  Spam filtering rules already exist in: {$spamSieveScript}\n";
+                return;
+            }
+        }
+        
+        // Write spam filtering rules
+        file_put_contents($spamSieveScript, $spamRules);
+        exec("chown {$username}:{$username} {$spamSieveScript}");
+        exec("chmod 644 {$spamSieveScript}");
+        echo "  ✅ Created spam filtering rules: {$spamSieveScript}\n";
+        
+        // Create or update main sieve script to include spam filter
+        $mainSieveContent = $this->generateMainSieveScript();
+        
+        if (file_exists($sieveScript)) {
+            $existingMain = file_get_contents($sieveScript);
+            if (strpos($existingMain, 'spam-filter.sieve') !== false) {
+                echo "  ℹ️  Main sieve script already includes spam filter\n";
+            } else {
+                // Append to existing script
+                $mainSieveContent = $existingMain . "\n" . $mainSieveContent;
+                file_put_contents($sieveScript, $mainSieveContent);
+                echo "  ✅ Updated main sieve script to include spam filter\n";
+            }
+        } else {
+            // Create new main script
+            file_put_contents($sieveScript, $mainSieveContent);
+            echo "  ✅ Created main sieve script: {$sieveScript}\n";
+        }
+        
+        // Set proper ownership
+        exec("chown {$username}:{$username} {$sieveScript}");
+        exec("chmod 644 {$sieveScript}");
+        
+        // Compile sieve script
+        exec("sudo -u {$username} sievec {$sieveScript} 2>/dev/null", $compileOutput, $compileReturn);
+        if ($compileReturn === 0) {
+            echo "  ✅ Compiled sieve script successfully\n";
+        } else {
+            echo "  ⚠️  Sieve compilation may have issues (this is often normal)\n";
+        }
+        
+        // Reload Dovecot to pick up changes
+        exec("systemctl reload dovecot 2>/dev/null");
+        echo "  🔄 Reloaded Dovecot configuration\n";
+    }
+    
+    /**
+     * Generate spam filtering Sieve rules
+     */
+    private function generateSpamSieveRules(): string
+    {
+        return <<<'SIEVE'
+# Cyford Web Armor Spam Filtering Rules
+# Auto-generated - Do not edit manually
+
+require ["fileinto", "mailbox"];
+
+# Move emails marked as spam by Cyford Web Armor
+if header :contains "X-Spam-Flag" "YES" {
+    # Create Spambox folder if it doesn't exist
+    if not mailboxexists "Spambox" {
+        mailboxcreate "Spambox";
+    }
+    fileinto "Spambox";
+    stop;
+}
+
+# Also check for SpamAssassin compatibility
+if header :contains "X-Spam-Status" "Yes" {
+    if not mailboxexists "Spambox" {
+        mailboxcreate "Spambox";
+    }
+    fileinto "Spambox";
+    stop;
+}
+
+# Move emails with ***SPAM*** in subject
+if header :contains "Subject" "***SPAM***" {
+    if not mailboxexists "Spambox" {
+        mailboxcreate "Spambox";
+    }
+    fileinto "Spambox";
+    stop;
+}
+SIEVE;
+    }
+    
+    /**
+     * Generate main Sieve script that includes spam filter
+     */
+    private function generateMainSieveScript(): string
+    {
+        return <<<'SIEVE'
+# Main Sieve Script - Auto-generated by Cyford Web Armor
+require ["include"];
+
+# Include spam filtering rules
+include :personal "spam-filter";
+
+# Add your custom rules below this line
+SIEVE;
+    }
+
+    /**
      * Show help information
      */
     private function showHelp(): void
@@ -944,6 +1171,7 @@ EOF;
         echo "  create-docker      - Create Docker environment with full mail stack\n";
         echo "  create-user        - Create mail user (--username=user --password=pass)\n";
         echo "  setup-user-permissions - Setup user directory permissions for postfix (--username=user or --username=all)\n";
+        echo "  setup-sieve-rules      - Setup Dovecot Sieve spam filtering rules (--username=user or --username=all)\n";
         echo "  test-database      - Test database connection and functionality\n";
         echo "  view-spam-patterns - View spam patterns (--limit=20)\n";
         echo "  clear-spam-pattern - Remove spam pattern (--pattern_id=123)\n";

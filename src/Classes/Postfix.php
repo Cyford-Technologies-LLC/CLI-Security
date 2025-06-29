@@ -747,9 +747,16 @@ EOF;
                 $this->requeueEmail($emailData, $recipient, $logger);
                 break;
                 
+            case 'headers':
+                $logger->info("Adding X-Spam headers and delivering email.");
+                $emailData = $this->addSpamHeaders($emailData, $spamReason, $logger);
+                $this->requeueEmail($emailData, $recipient, $logger);
+                break;
+                
             default:
-                $logger->warning("Unknown spam action: {$spamAction}. Rejecting email.");
-                $this->bounceSpamEmail($headers, $logger);
+                $logger->warning("Unknown spam action: {$spamAction}. Adding spam headers.");
+                $emailData = $this->addSpamHeaders($emailData, $spamReason, $logger);
+                $this->requeueEmail($emailData, $recipient, $logger);
         }
     }
 
@@ -913,6 +920,71 @@ EOF;
         
         $logger->warning("Could not resolve alias {$email} to a real user");
         return null;
+    }
+
+    /**
+     * Add X-Spam headers to email (SpamAssassin compatible)
+     */
+    private function addSpamHeaders(string $emailData, string $spamReason, $logger): string
+    {
+        $logger->info("Adding X-Spam headers to email");
+        
+        // Generate spam score (simple scoring based on reason)
+        $spamScore = $this->calculateSpamScore($spamReason);
+        $spamLevel = str_repeat('*', min(10, (int)$spamScore)); // Max 10 stars
+        
+        // Create X-Spam headers (SpamAssassin compatible)
+        $spamHeaders = "X-Spam-Flag: YES\r\n";
+        $spamHeaders .= "X-Spam-Checker-Version: Cyford Web Armor 1.0\r\n";
+        $spamHeaders .= "X-Spam-Level: {$spamLevel}\r\n";
+        $spamHeaders .= "X-Spam-Score: {$spamScore}\r\n";
+        $spamHeaders .= "X-Spam-Status: Yes, score={$spamScore} required=5.0 tests=CYFORD_SPAM\r\n";
+        $spamHeaders .= "X-Spam-Subject: ***SPAM*** \r\n";
+        $spamHeaders .= "X-Spam-Report: {$spamReason}\r\n";
+        
+        // Add headers after existing headers
+        if (preg_match('/(.*?\r?\n\r?\n)(.*)/s', $emailData, $matches)) {
+            $existingHeaders = $matches[1];
+            $body = $matches[2];
+            
+            // Modify subject to add ***SPAM*** prefix if not already there
+            if (!preg_match('/Subject:.*\*\*\*SPAM\*\*\*/i', $existingHeaders)) {
+                $existingHeaders = preg_replace(
+                    '/^(Subject:\s*)(.*?)$/m',
+                    '$1***SPAM*** $2',
+                    $existingHeaders
+                );
+            }
+            
+            return $existingHeaders . $spamHeaders . "\r\n" . $body;
+        }
+        
+        // Fallback: add headers at the beginning
+        return $spamHeaders . "\r\n" . $emailData;
+    }
+    
+    /**
+     * Calculate spam score based on detection reason
+     */
+    private function calculateSpamScore(string $spamReason): float
+    {
+        $score = 5.0; // Base spam score
+        
+        // Increase score based on specific patterns
+        if (stripos($spamReason, 'suspicious subject') !== false) {
+            $score += 2.0;
+        }
+        if (stripos($spamReason, 'body patterns') !== false) {
+            $score += 3.0;
+        }
+        if (stripos($spamReason, 'blacklist') !== false) {
+            $score += 5.0;
+        }
+        if (stripos($spamReason, 'hash match') !== false) {
+            $score += 10.0;
+        }
+        
+        return round($score, 1);
     }
 
     /**
