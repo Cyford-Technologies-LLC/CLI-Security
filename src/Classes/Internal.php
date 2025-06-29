@@ -945,6 +945,12 @@ EOF;
             return;
         }
         
+        // Check and install Dovecot Sieve requirements first
+        if (!$this->checkAndInstallSieveRequirements()) {
+            echo "❌ Failed to install Sieve requirements\n";
+            return;
+        }
+        
         if ($username === 'all') {
             $this->setupSieveRulesForAllUsers();
             return;
@@ -960,6 +966,117 @@ EOF;
         }
     }
     
+    /**
+     * Check and install Dovecot Sieve requirements
+     */
+    private function checkAndInstallSieveRequirements(): bool
+    {
+        echo "🔍 Checking Dovecot Sieve requirements...\n";
+        
+        // Check if Dovecot is installed
+        exec("systemctl is-active dovecot 2>/dev/null", $output, $returnCode);
+        if ($returnCode !== 0) {
+            echo "❌ Dovecot is not running. Please install and start Dovecot first.\n";
+            return false;
+        }
+        echo "✅ Dovecot is running\n";
+        
+        // Check if sievec command exists
+        exec("which sievec 2>/dev/null", $sievecPath, $sievecReturn);
+        if ($sievecReturn !== 0) {
+            echo "📦 Installing Dovecot Pigeonhole (Sieve)...\n";
+            
+            // Try different package managers
+            $installCommands = [
+                'dnf install -y dovecot-pigeonhole',
+                'yum install -y dovecot-pigeonhole',
+                'apt-get install -y dovecot-sieve dovecot-managesieved'
+            ];
+            
+            $installed = false;
+            foreach ($installCommands as $cmd) {
+                exec($cmd . ' 2>/dev/null', $installOutput, $installReturn);
+                if ($installReturn === 0) {
+                    echo "✅ Installed Dovecot Sieve successfully\n";
+                    $installed = true;
+                    break;
+                }
+            }
+            
+            if (!$installed) {
+                echo "❌ Failed to install Dovecot Sieve. Please install manually:\n";
+                echo "  Rocky/RHEL: dnf install dovecot-pigeonhole\n";
+                echo "  Ubuntu/Debian: apt-get install dovecot-sieve dovecot-managesieved\n";
+                return false;
+            }
+        } else {
+            echo "✅ Dovecot Sieve is already installed\n";
+        }
+        
+        // Configure Dovecot for Sieve
+        $this->configureDovecotSieve();
+        
+        return true;
+    }
+    
+    /**
+     * Configure Dovecot for Sieve support
+     */
+    private function configureDovecotSieve(): void
+    {
+        echo "⚙️  Configuring Dovecot Sieve...\n";
+        
+        // Enable Sieve in IMAP configuration
+        $imapConfig = '/etc/dovecot/conf.d/20-imap.conf';
+        if (file_exists($imapConfig)) {
+            $content = file_get_contents($imapConfig);
+            if (strpos($content, 'imap_sieve') === false) {
+                // Add sieve to mail_plugins
+                $content = preg_replace(
+                    '/^(\s*mail_plugins\s*=\s*.*?)$/m',
+                    '$1 imap_sieve',
+                    $content
+                );
+                file_put_contents($imapConfig, $content);
+                echo "✅ Enabled Sieve in IMAP configuration\n";
+            }
+        }
+        
+        // Configure ManageSieve
+        $sieveConfig = '/etc/dovecot/conf.d/20-managesieve.conf';
+        if (file_exists($sieveConfig)) {
+            $content = file_get_contents($sieveConfig);
+            // Uncomment ManageSieve service
+            $content = str_replace('#service managesieve-login', 'service managesieve-login', $content);
+            $content = str_replace('#  inet_listener sieve', '  inet_listener sieve', $content);
+            $content = str_replace('#    port = 4190', '    port = 4190', $content);
+            file_put_contents($sieveConfig, $content);
+            echo "✅ Configured ManageSieve service\n";
+        }
+        
+        // Enable Sieve plugin globally
+        $mailConfig = '/etc/dovecot/conf.d/10-mail.conf';
+        if (file_exists($mailConfig)) {
+            $content = file_get_contents($mailConfig);
+            if (strpos($content, 'mail_plugins') === false || strpos($content, 'sieve') === false) {
+                $content .= "\n# Sieve plugin\nmail_plugins = \$mail_plugins sieve\n";
+                file_put_contents($mailConfig, $content);
+                echo "✅ Enabled Sieve plugin globally\n";
+            }
+        }
+        
+        // Restart Dovecot to apply changes
+        exec('systemctl restart dovecot 2>/dev/null', $restartOutput, $restartReturn);
+        if ($restartReturn === 0) {
+            echo "✅ Restarted Dovecot successfully\n";
+        } else {
+            echo "⚠️  Dovecot restart may have issues, but continuing...\n";
+        }
+        
+        // Wait a moment for Dovecot to fully start
+        sleep(2);
+    }
+
     /**
      * Setup Sieve rules for all users
      */
