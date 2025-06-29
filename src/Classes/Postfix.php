@@ -803,47 +803,34 @@ EOF;
         
         $logger->info("Resolved {$recipient} to real user: {$realUser}");
         
-        // Get user's home directory and maildir path
-        $maildirPath = "/home/{$realUser}/Maildir/.{$spamFolder}";
+        // Get user's maildir path from config
+        global $config;
+        $maildirTemplate = $config['postfix']['spam_handling']['maildir_path'] ?? '/home/{user}/Maildir';
+        $userMaildir = str_replace('{user}', $realUser, $maildirTemplate);
+        $maildirPath = "{$userMaildir}/.{$spamFolder}";
         
-        // Create spam folder if it doesn't exist (using sudo to create as correct user)
+        // Create spam folder if it doesn't exist
         if (!is_dir($maildirPath)) {
-            $commands = [
-                "sudo -u {$realUser} mkdir -p {$maildirPath}",
-                "sudo -u {$realUser} mkdir -p {$maildirPath}/cur",
-                "sudo -u {$realUser} mkdir -p {$maildirPath}/new",
-                "sudo -u {$realUser} mkdir -p {$maildirPath}/tmp"
-            ];
+            mkdir($maildirPath, 0755, true);
+            mkdir($maildirPath . '/cur', 0755, true);
+            mkdir($maildirPath . '/new', 0755, true);
+            mkdir($maildirPath . '/tmp', 0755, true);
             
-            foreach ($commands as $cmd) {
-                exec($cmd, $output, $returnCode);
-                if ($returnCode !== 0) {
-                    $logger->error("Failed to create spam folder with command: {$cmd}");
-                    throw new \RuntimeException("Cannot create spam folder for user {$realUser}");
-                }
-            }
+            // Set proper ownership
+            exec("chown -R {$realUser}:{$realUser} {$maildirPath}");
             $logger->info("Created spam folder: {$maildirPath}");
         }
         
-        // Save email to spam folder using proper user permissions
+        // Save email to spam folder
         $filename = time() . '.' . uniqid() . '.spam';
         $spamFile = $maildirPath . '/new/' . $filename;
-        $tempFile = '/tmp/' . $filename;
         
-        // Write to temp file first, then move with proper ownership
-        if (file_put_contents($tempFile, $emailData)) {
-            $moveCmd = "sudo -u {$realUser} mv {$tempFile} {$spamFile}";
-            exec($moveCmd, $output, $returnCode);
-            
-            if ($returnCode === 0) {
-                $logger->info("Spam email quarantined to: {$spamFile}");
-            } else {
-                $logger->error("Failed to move spam email to quarantine folder.");
-                unlink($tempFile); // Clean up temp file
-                throw new \RuntimeException("Quarantine failed");
-            }
+        if (file_put_contents($spamFile, $emailData)) {
+            // Set proper ownership
+            exec("chown {$realUser}:{$realUser} {$spamFile}");
+            $logger->info("Spam email quarantined to: {$spamFile}");
         } else {
-            $logger->error("Failed to write spam email to temp file.");
+            $logger->error("Failed to quarantine spam email. Rejecting instead.");
             throw new \RuntimeException("Quarantine failed");
         }
     }

@@ -48,6 +48,10 @@ class Internal
                 $this->reloadLists();
                 break;
                 
+            case 'setup-permissions':
+                $this->setupPermissions();
+                break;
+                
             default:
                 $this->showHelp();
         }
@@ -253,6 +257,109 @@ class Internal
     }
 
     /**
+     * Setup all permissions for report-ip user
+     */
+    private function setupPermissions(): void
+    {
+        echo "🔧 Setting up permissions for Cyford Security...\n";
+        
+        try {
+            // 1. Create sudoers rule
+            echo "📝 Creating sudoers rule...\n";
+            $sudoersContent = "# Cyford Security permissions\n";
+            $sudoersContent .= "report-ip ALL=(ALL) NOPASSWD: /bin/mkdir, /bin/chown, /bin/chmod\n";
+            
+            $sudoersFile = '/etc/sudoers.d/cyford-security';
+            if (file_put_contents($sudoersFile, $sudoersContent)) {
+                exec("chmod 440 {$sudoersFile}");
+                echo "✅ Sudoers rule created: {$sudoersFile}\n";
+            } else {
+                echo "❌ Failed to create sudoers rule\n";
+            }
+            
+            // 2. Setup log directories
+            echo "📁 Setting up log directories...\n";
+            $logDirs = [
+                '/var/log/cyford-security',
+                '/var/log/cyford-security/errors'
+            ];
+            
+            foreach ($logDirs as $dir) {
+                if (!is_dir($dir)) {
+                    mkdir($dir, 0755, true);
+                }
+                exec("chown -R report-ip:report-ip {$dir}");
+                exec("chmod -R 755 {$dir}");
+                echo "✅ Log directory: {$dir}\n";
+            }
+            
+            // 3. Setup database directory
+            echo "🗄️ Setting up database...\n";
+            $dbPath = $this->config['database']['path'];
+            $dbDir = dirname($dbPath);
+            
+            if (!is_dir($dbDir)) {
+                mkdir($dbDir, 0755, true);
+            }
+            
+            if (file_exists($dbPath)) {
+                exec("chown postfix:postfix {$dbPath}");
+                exec("chmod 664 {$dbPath}");
+                echo "✅ Database permissions: {$dbPath}\n";
+            }
+            
+            exec("chown postfix:postfix {$dbDir}");
+            exec("chmod 755 {$dbDir}");
+            echo "✅ Database directory: {$dbDir}\n";
+            
+            // 4. Setup list files
+            echo "📋 Setting up list files...\n";
+            $listFiles = [
+                $this->config['whitelist']['ips_file'],
+                $this->config['whitelist']['domains_file'],
+                $this->config['whitelist']['emails_file'],
+                $this->config['blacklist']['ips_file'],
+                $this->config['blacklist']['domains_file'],
+                $this->config['blacklist']['emails_file']
+            ];
+            
+            foreach ($listFiles as $file) {
+                $dir = dirname($file);
+                if (!is_dir($dir)) {
+                    mkdir($dir, 0755, true);
+                }
+                
+                if (!file_exists($file)) {
+                    file_put_contents($file, "# Add entries here\n");
+                }
+                
+                exec("chown report-ip:report-ip {$file}");
+                exec("chmod 644 {$file}");
+                echo "✅ List file: {$file}\n";
+            }
+            
+            // 5. Setup project directory
+            echo "📂 Setting up project directory...\n";
+            $projectDir = '/usr/local/share/cyford/security';
+            exec("chown -R report-ip:report-ip {$projectDir}");
+            exec("chmod -R 755 {$projectDir}");
+            echo "✅ Project directory: {$projectDir}\n";
+            
+            echo "\n🎉 Permission setup completed successfully!\n";
+            echo "\n📋 Summary:\n";
+            echo "  ✅ Sudoers rule created for report-ip user\n";
+            echo "  ✅ Log directories configured\n";
+            echo "  ✅ Database permissions set\n";
+            echo "  ✅ List files initialized\n";
+            echo "  ✅ Project directory permissions set\n";
+            echo "\n🚀 System is ready for operation!\n";
+            
+        } catch (Exception $e) {
+            echo "❌ Permission setup failed: " . $e->getMessage() . "\n";
+        }
+    }
+
+    /**
      * Show help information
      */
     private function showHelp(): void
@@ -263,6 +370,7 @@ class Internal
         
         echo "Available Commands:\n";
         echo "  setup-database     - Initialize database with proper permissions\n";
+        echo "  setup-permissions  - Setup all system permissions for report-ip user\n";
         echo "  test-database      - Test database connection and functionality\n";
         echo "  view-spam-patterns - View spam patterns (--limit=20)\n";
         echo "  clear-spam-pattern - Remove spam pattern (--pattern_id=123)\n";
@@ -272,6 +380,7 @@ class Internal
         echo "  help               - Show this help message\n\n";
         
         echo "Examples:\n";
+        echo "  php index.php --input_type=internal --command=setup-permissions\n";
         echo "  php index.php --input_type=internal --command=setup-database\n";
         echo "  php index.php --input_type=internal --command=stats\n";
         echo "  php index.php --input_type=internal --command=test-spam-filter --subject='Hello' --body='Test message'\n";

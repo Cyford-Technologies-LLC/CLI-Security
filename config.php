@@ -38,6 +38,7 @@ return [
             'action' => 'quarantine', // Options: 'reject', 'quarantine', 'allow'
             'bounce_message' => 'Your message has been rejected due to spam content by Cyford Web Armor. Please contact the administrator if you believe this is an error.',
             'quarantine_folder' => 'Spam', // Folder name to create for spam emails
+            'maildir_path' => '/home/{user}/Maildir-cyford', // Path to user maildir ({user} will be replaced)
             'add_footer' => true, // Add spam filter footer to clean emails
             'footer_text' => '\n\n--- This email has been scanned by Cyford Web Armor ---',
             'spam_log_file' => '/var/log/cyford-security/spam.log', // Detailed spam log with raw emails
