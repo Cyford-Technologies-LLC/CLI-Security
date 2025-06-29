@@ -1010,7 +1010,36 @@ EOF;
                 return false;
             }
         } else {
-            echo "✅ Dovecot Sieve is already installed\n";
+            echo "✅ Dovecot Sieve command is available\n";
+        }
+        
+        // Verify Sieve plugin files exist
+        $sievePluginPaths = [
+            '/usr/lib64/dovecot/lib90_sieve_plugin.so',
+            '/usr/lib64/dovecot/lib20_sieve_plugin.so',
+            '/usr/lib/dovecot/lib90_sieve_plugin.so',
+            '/usr/lib/dovecot/lib20_sieve_plugin.so'
+        ];
+        
+        $pluginFound = false;
+        foreach ($sievePluginPaths as $pluginPath) {
+            if (file_exists($pluginPath)) {
+                echo "✅ Found Sieve plugin: {$pluginPath}\n";
+                $pluginFound = true;
+                break;
+            }
+        }
+        
+        if (!$pluginFound) {
+            echo "❌ Sieve plugin files not found. Checking what was installed...\n";
+            exec('find /usr/lib* -name "*sieve*" 2>/dev/null', $findOutput);
+            if (!empty($findOutput)) {
+                echo "ℹ️  Found Sieve-related files:\n";
+                foreach ($findOutput as $file) {
+                    echo "    {$file}\n";
+                }
+            }
+            echo "⚠️  Sieve plugin may not work properly\n";
         }
         
         // Configure Dovecot for Sieve
@@ -1034,27 +1063,31 @@ EOF;
 # Cyford Web Armor Sieve Configuration
 # Auto-generated - Safe to remove if not needed
 
-# Enable Sieve plugin for IMAP
-protocol imap {
-  mail_plugins = $mail_plugins imap_sieve
+# Enable Sieve plugin for LDA (Local Delivery Agent)
+protocol lda {
+  mail_plugins = $mail_plugins sieve
 }
 
-# Enable ManageSieve protocol
-protocol sieve {
-  managesieve_max_line_length = 65536
+# Enable Sieve plugin for LMTP
+protocol lmtp {
+  mail_plugins = $mail_plugins sieve
 }
 
-# ManageSieve service
+# ManageSieve service for remote sieve management
 service managesieve-login {
   inet_listener sieve {
     port = 4190
   }
 }
 
+service managesieve {
+}
+
 # Sieve plugin settings
 plugin {
   sieve = file:~/sieve;active=~/.dovecot.sieve
-  sieve_global_extensions = +vnd.dovecot.pipe +vnd.dovecot.environment
+  sieve_default = /var/lib/dovecot/sieve/default.sieve
+  sieve_dir = ~/sieve
 }
 DOVECOT;
             
