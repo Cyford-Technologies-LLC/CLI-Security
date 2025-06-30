@@ -1475,29 +1475,38 @@ BASH;
         }
         
         // Fix dovecot log files and directories (handle typo in dovecot config)
-        $logPaths = [
-            '/var/log/dovecot',
-            '/var/log/dovcot',
+        $logDirs = ['/var/log/dovecot', '/var/log/dovcot'];
+        $logFiles = [
             '/var/log/dovecot/error.log',
             '/var/log/dovcot/error.log',
             '/var/log/dovecot/info.log',
-            '/var/log/dovcot/info.log'
+            '/var/log/dovcot/info.log',
+            '/var/log/dovecot/debug.log',
+            '/var/log/dovcot/debug.log'
         ];
         
-        foreach ($logPaths as $path) {
-            if (is_dir($path) || file_exists($path)) {
-                exec("chown -R dovecot:mail {$path}");
-                exec("chmod -R 664 {$path}");
-            } elseif (strpos($path, '.log') !== false) {
-                // Create log file if it doesn't exist
-                $dir = dirname($path);
-                if (!is_dir($dir)) {
-                    mkdir($dir, 0775, true);
-                }
-                touch($path);
-                exec("chown dovecot:mail {$path}");
-                exec("chmod 664 {$path}");
+        // Create and fix log directories
+        foreach ($logDirs as $dir) {
+            if (!is_dir($dir)) {
+                mkdir($dir, 0775, true);
             }
+            exec("chown dovecot:mail {$dir}");
+            exec("chmod 775 {$dir}");
+        }
+        
+        // Fix existing log files and create missing ones
+        foreach ($logFiles as $file) {
+            $dir = dirname($file);
+            if (!is_dir($dir)) {
+                mkdir($dir, 0775, true);
+                exec("chown dovecot:mail {$dir}");
+            }
+            
+            if (!file_exists($file)) {
+                touch($file);
+            }
+            exec("chown dovecot:mail {$file}");
+            exec("chmod 666 {$file}");
         }
         echo "✅ Fixed Dovecot log file permissions\n";
         
@@ -1506,15 +1515,30 @@ BASH;
         if (is_dir($socketDir)) {
             exec("chgrp -R mail {$socketDir}");
             exec("chmod -R g+rw {$socketDir}");
+            // Fix specific socket files that may exist
+            exec("find {$socketDir} -type s -exec chmod g+rw {} \;");
+            exec("find {$socketDir} -type f -exec chmod g+rw {} \;");
             echo "✅ Fixed Dovecot socket directory permissions\n";
         }
         
         // Create dovecot-lda wrapper script
         $this->createDovecotLDAWrapper();
         
+        // Fix any remaining permission issues
+        exec('find /var/log -name "*dovecot*" -o -name "*dovcot*" | xargs chown dovecot:mail 2>/dev/null');
+        exec('find /var/log -name "*dovecot*" -o -name "*dovcot*" | xargs chmod 666 2>/dev/null');
+        
         // Restart dovecot to apply permission changes
         exec('systemctl restart dovecot 2>/dev/null');
         echo "✅ Restarted Dovecot to apply permissions\n";
+        
+        // Wait for dovecot to start and fix runtime permissions
+        sleep(2);
+        if (is_dir('/run/dovecot')) {
+            exec('chgrp -R mail /run/dovecot 2>/dev/null');
+            exec('chmod -R g+rw /run/dovecot 2>/dev/null');
+            echo "✅ Fixed runtime socket permissions\n";
+        }
     }
 
     /**
