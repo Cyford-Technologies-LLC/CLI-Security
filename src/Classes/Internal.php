@@ -1428,22 +1428,28 @@ DOVECOT;
             }
         }
         
-        // Create dovecot log directory with group permissions
-        $logDir = '/var/log/dovecot';
-        if (!is_dir($logDir)) {
-            mkdir($logDir, 0775, true);
+        // Create dovecot log directory with group permissions (handle typo in dovecot config)
+        $logDirs = ['/var/log/dovecot', '/var/log/dovcot'];
+        foreach ($logDirs as $logDir) {
+            if (!is_dir($logDir)) {
+                mkdir($logDir, 0775, true);
+            }
+            exec("chown dovecot:mail {$logDir}");
+            exec("chmod 775 {$logDir}");
         }
-        exec("chown dovecot:mail {$logDir}");
-        exec("chmod 775 {$logDir}");
         echo "✅ Fixed Dovecot log directory permissions\n";
         
-        // Set permissions on dovecot socket directory
+        // Set permissions on dovecot socket directory and files
         $socketDir = '/run/dovecot';
         if (is_dir($socketDir)) {
-            exec("chgrp mail {$socketDir}");
-            exec("chmod g+rx {$socketDir}");
+            exec("chgrp -R mail {$socketDir}");
+            exec("chmod -R g+rw {$socketDir}");
             echo "✅ Fixed Dovecot socket directory permissions\n";
         }
+        
+        // Restart dovecot to apply permission changes
+        exec('systemctl restart dovecot 2>/dev/null');
+        echo "✅ Restarted Dovecot to apply permissions\n";
     }
 
     /**
