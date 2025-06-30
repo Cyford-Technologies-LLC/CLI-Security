@@ -542,6 +542,9 @@ EOF;
             case 'smtp':
                 $this->requeueWithSMTP($emailData, $recipient, $logger);
                 break;
+            case 'dovecot-lda':
+                $this->requeueWithDovecotLDA($emailData, $recipient, $logger);
+                break;
             default:
                 $error = "Unknown requeue method: {$requeueMethod}";
                 $logger->error($error);
@@ -1311,6 +1314,57 @@ EOF;
             $logger->info("Email quarantined due to system error: {$errorFile}");
         } else {
             $logger->error("Failed to quarantine email with system error");
+        }
+    }
+
+    /**
+     * Requeue with Dovecot LDA
+     */
+    private function requeueWithDovecotLDA(string $emailData, string $recipient, $logger): void
+    {
+        $logger->info("Delivering email via Dovecot LDA...");
+        
+        // Find dovecot-lda path
+        $ldaPaths = ['/usr/lib/dovecot/dovecot-lda', '/usr/libexec/dovecot/dovecot-lda'];
+        $ldaPath = null;
+        foreach ($ldaPaths as $path) {
+            if (file_exists($path)) {
+                $ldaPath = $path;
+                break;
+            }
+        }
+        
+        if (!$ldaPath) {
+            throw new RuntimeException("dovecot-lda not found");
+        }
+        
+        $command = "{$ldaPath} -f '' -a {$recipient}";
+        $logger->info("Executing dovecot-lda command: {$command}");
+        
+        $process = proc_open($command, [
+            ['pipe', 'r'],
+            ['pipe', 'w'],
+            ['pipe', 'w'],
+        ], $pipes);
+        
+        if (is_resource($process)) {
+            fwrite($pipes[0], $emailData);
+            fclose($pipes[0]);
+            
+            $output = stream_get_contents($pipes[1]);
+            $errors = stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            
+            $returnCode = proc_close($process);
+            
+            if ($returnCode !== 0) {
+                throw new RuntimeException("dovecot-lda failed. Exit code: {$returnCode}. Errors: {$errors}");
+            }
+            
+            $logger->info("Email successfully delivered via dovecot-lda");
+        } else {
+            throw new RuntimeException("Failed to open process for dovecot-lda execution");
         }
     }
 
