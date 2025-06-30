@@ -1428,16 +1428,32 @@ DOVECOT;
             }
         }
         
-        // Create dovecot log directory with group permissions (handle typo in dovecot config)
-        $logDirs = ['/var/log/dovecot', '/var/log/dovcot'];
-        foreach ($logDirs as $logDir) {
-            if (!is_dir($logDir)) {
-                mkdir($logDir, 0775, true);
+        // Fix dovecot log files and directories (handle typo in dovecot config)
+        $logPaths = [
+            '/var/log/dovecot',
+            '/var/log/dovcot',
+            '/var/log/dovecot/error.log',
+            '/var/log/dovcot/error.log',
+            '/var/log/dovecot/info.log',
+            '/var/log/dovcot/info.log'
+        ];
+        
+        foreach ($logPaths as $path) {
+            if (is_dir($path) || file_exists($path)) {
+                exec("chown -R dovecot:mail {$path}");
+                exec("chmod -R 664 {$path}");
+            } elseif (strpos($path, '.log') !== false) {
+                // Create log file if it doesn't exist
+                $dir = dirname($path);
+                if (!is_dir($dir)) {
+                    mkdir($dir, 0775, true);
+                }
+                touch($path);
+                exec("chown dovecot:mail {$path}");
+                exec("chmod 664 {$path}");
             }
-            exec("chown dovecot:mail {$logDir}");
-            exec("chmod 775 {$logDir}");
         }
-        echo "✅ Fixed Dovecot log directory permissions\n";
+        echo "✅ Fixed Dovecot log file permissions\n";
         
         // Set permissions on dovecot socket directory and files
         $socketDir = '/run/dovecot';
