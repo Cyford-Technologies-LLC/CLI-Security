@@ -287,7 +287,7 @@ class Internal
             // 1. Create sudoers rule
             echo "📝 Creating sudoers rule...\n";
             $sudoersContent = "# Cyford Security permissions\n";
-            $sudoersContent .= "report-ip ALL=(ALL) NOPASSWD: /bin/mkdir, /bin/chown, /bin/chmod, /usr/lib/dovecot/dovecot-lda, /usr/libexec/dovecot/dovecot-lda\n";
+            $sudoersContent .= "report-ip ALL=(ALL) NOPASSWD: /bin/mkdir, /bin/chown, /bin/chmod\n";
             
             $sudoersFile = '/etc/sudoers.d/cyford-security';
             if (file_put_contents($sudoersFile, $sudoersContent)) {
@@ -1337,9 +1337,10 @@ DOVECOT;
             
             echo "\n🎉 Dovecot Sieve setup completed successfully!\n";
             echo "\n📝 Next steps:\n";
-            echo "  1. Set requeue_method = 'dovecot-lda' in config.php\n";
-            echo "  2. Run: --command=setup-sieve-rules --username=all\n";
-            echo "  3. Test spam filtering\n";
+            echo "  1. Run: --command=setup-sieve-rules --username=all\n";
+            echo "  2. Test spam filtering\n";
+            echo "\nℹ️  Note: Postfix configured to use dovecot-lda for local delivery\n";
+            echo "  Spam emails will be filtered by Sieve rules automatically\n";
             
         } catch (Exception $e) {
             echo "❌ Setup failed: " . $e->getMessage() . "\n";
@@ -1411,32 +1412,37 @@ DOVECOT;
      */
     private function setupDovecotPermissions(): void
     {
-        // Add report-ip to dovecot group
+        // Add report-ip to mail and dovecot groups
+        exec('usermod -a -G mail report-ip 2>/dev/null');
         exec('usermod -a -G dovecot report-ip 2>/dev/null');
-        echo "✅ Added report-ip to dovecot group\n";
+        echo "✅ Added report-ip to mail and dovecot groups\n";
         
-        // Create dovecot log directory with proper permissions
+        // Set group permissions on dovecot-lda binary
+        $ldaPaths = ['/usr/lib/dovecot/dovecot-lda', '/usr/libexec/dovecot/dovecot-lda'];
+        foreach ($ldaPaths as $ldaPath) {
+            if (file_exists($ldaPath)) {
+                exec("chgrp mail {$ldaPath}");
+                exec("chmod g+x {$ldaPath}");
+                echo "✅ Set group permissions on {$ldaPath}\n";
+                break;
+            }
+        }
+        
+        // Create dovecot log directory with group permissions
         $logDir = '/var/log/dovecot';
         if (!is_dir($logDir)) {
-            mkdir($logDir, 0755, true);
+            mkdir($logDir, 0775, true);
         }
-        exec("chown dovecot:dovecot {$logDir}");
-        exec("chmod 755 {$logDir}");
+        exec("chown dovecot:mail {$logDir}");
+        exec("chmod 775 {$logDir}");
         echo "✅ Fixed Dovecot log directory permissions\n";
         
-        // Update sudoers for dovecot-lda
-        $sudoersFile = '/etc/sudoers.d/cyford-security';
-        if (file_exists($sudoersFile)) {
-            $content = file_get_contents($sudoersFile);
-            if (strpos($content, 'dovecot-lda') === false) {
-                $content = str_replace(
-                    'report-ip ALL=(ALL) NOPASSWD: /bin/mkdir, /bin/chown, /bin/chmod',
-                    'report-ip ALL=(ALL) NOPASSWD: /bin/mkdir, /bin/chown, /bin/chmod, /usr/lib/dovecot/dovecot-lda, /usr/libexec/dovecot/dovecot-lda',
-                    $content
-                );
-                file_put_contents($sudoersFile, $content);
-                echo "✅ Updated sudoers for dovecot-lda access\n";
-            }
+        // Set permissions on dovecot socket directory
+        $socketDir = '/run/dovecot';
+        if (is_dir($socketDir)) {
+            exec("chgrp mail {$socketDir}");
+            exec("chmod g+rx {$socketDir}");
+            echo "✅ Fixed Dovecot socket directory permissions\n";
         }
     }
 
