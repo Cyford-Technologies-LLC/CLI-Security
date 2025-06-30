@@ -28,7 +28,7 @@ return [
         ],
     ],
     'postfix' => [
-        'requeue_method' => 'dovecot-lda', // Options: smtp, sendmail, postdrop, postpickup, dovecot-lda (dovecot-lda enables Sieve filtering)
+        'requeue_method' => 'smtp', // Options: smtp, sendmail, postdrop, postpickup, dovecot-lda (SMTP recommended for chroot compatibility)
         'main_config' => '/etc/postfix/main.cf', // Path to Postfix main configuration file
         'master_config' => '/etc/postfix/master.cf', // Path to Postfix master configuration file
         'postfix_command' => '/usr/sbin/postfix', // Path to Postfix executable

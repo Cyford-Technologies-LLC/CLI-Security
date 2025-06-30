@@ -1408,6 +1408,45 @@ DOVECOT;
     }
     
     /**
+     * Create dovecot-lda wrapper script
+     */
+    private function createDovecotLDAWrapper(): void
+    {
+        $wrapperScript = '/usr/local/bin/cyford-dovecot-lda';
+        
+        // Find dovecot-lda path
+        $ldaPaths = ['/usr/lib/dovecot/dovecot-lda', '/usr/libexec/dovecot/dovecot-lda'];
+        $ldaPath = null;
+        foreach ($ldaPaths as $path) {
+            if (file_exists($path)) {
+                $ldaPath = $path;
+                break;
+            }
+        }
+        
+        if (!$ldaPath) {
+            echo "❌ dovecot-lda not found, skipping wrapper creation\n";
+            return;
+        }
+        
+        $wrapperContent = <<<BASH
+#!/bin/bash
+# Cyford Security dovecot-lda wrapper
+# Runs outside Postfix chroot with proper permissions
+
+# Extract username from email address
+USER=\$(echo "\$2" | cut -d'@' -f1)
+
+# Run dovecot-lda as the target user
+exec sudo -u "\$USER" {$ldaPath} -f "\$1" -a "\$2"
+BASH;
+        
+        file_put_contents($wrapperScript, $wrapperContent);
+        chmod($wrapperScript, 0755);
+        echo "✅ Created dovecot-lda wrapper: {$wrapperScript}\n";
+    }
+    
+    /**
      * Setup Dovecot permissions for report-ip user
      */
     private function setupDovecotPermissions(): void
@@ -1462,6 +1501,9 @@ DOVECOT;
             exec("chmod -R g+rw {$socketDir}");
             echo "✅ Fixed Dovecot socket directory permissions\n";
         }
+        
+        // Create dovecot-lda wrapper script
+        $this->createDovecotLDAWrapper();
         
         // Restart dovecot to apply permission changes
         exec('systemctl restart dovecot 2>/dev/null');
