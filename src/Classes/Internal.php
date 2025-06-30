@@ -1089,6 +1089,9 @@ EOF;
         // Configure Dovecot for Sieve
         $this->configureDovecotSieve();
         
+        // Configure Postfix for dovecot-lda if needed
+        $this->configurePostfixForDovecotLDA();
+        
         return true;
     }
     
@@ -1230,6 +1233,68 @@ DOVECOT;
         }
         
         echo "✅ Dovecot Sieve configuration completed successfully\n";
+    }
+    
+    /**
+     * Configure Postfix for dovecot-lda requeue method
+     */
+    private function configurePostfixForDovecotLDA(): void
+    {
+        $requeueMethod = $this->config['postfix']['requeue_method'] ?? 'smtp';
+        if ($requeueMethod !== 'dovecot-lda') {
+            return;
+        }
+        
+        $allowModification = $this->config['postfix']['allow_modification'] ?? false;
+        if (!$allowModification) {
+            echo "ℹ️  To enable Sieve filtering, set 'allow_modification' => true or manually add:\n";
+            echo "mailbox_command = /usr/lib/dovecot/dovecot-lda -f \$SENDER -a \$RECIPIENT\n";
+            return;
+        }
+        
+        echo "📧 Configuring Postfix for dovecot-lda delivery...\n";
+        
+        $mainConfig = $this->config['postfix']['main_config'];
+        if (!file_exists($mainConfig)) {
+            echo "❌ Postfix main.cf not found\n";
+            return;
+        }
+        
+        $content = file_get_contents($mainConfig);
+        
+        // Check if already configured
+        if (strpos($content, 'mailbox_command') !== false && strpos($content, 'dovecot-lda') !== false) {
+            echo "✅ Postfix already configured for dovecot-lda\n";
+            return;
+        }
+        
+        // Find dovecot-lda path
+        $ldaPaths = ['/usr/lib/dovecot/dovecot-lda', '/usr/libexec/dovecot/dovecot-lda'];
+        $ldaPath = null;
+        foreach ($ldaPaths as $path) {
+            if (file_exists($path)) {
+                $ldaPath = $path;
+                break;
+            }
+        }
+        
+        if (!$ldaPath) {
+            echo "❌ dovecot-lda not found\n";
+            return;
+        }
+        
+        // Remove existing mailbox_command and home_mailbox
+        $content = preg_replace('/^mailbox_command\s*=.*$/m', '', $content);
+        $content = preg_replace('/^home_mailbox\s*=.*$/m', '', $content);
+        
+        // Add dovecot-lda configuration
+        $content .= "\n# Dovecot LDA for Sieve filtering\nmailbox_command = {$ldaPath} -f \$SENDER -a \$RECIPIENT\n";
+        
+        file_put_contents($mainConfig, $content);
+        echo "✅ Configured Postfix for dovecot-lda: {$ldaPath}\n";
+        
+        exec('systemctl reload postfix 2>/dev/null');
+        echo "✅ Postfix reloaded\n";
     }
 
     /**
