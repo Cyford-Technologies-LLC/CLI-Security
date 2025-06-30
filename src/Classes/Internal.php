@@ -945,14 +945,23 @@ EOF;
             return;
         }
         
-        // Check and install Dovecot Sieve requirements first
-        if (!$this->checkAndInstallSieveRequirements()) {
-            echo "❌ Failed to install Sieve requirements\n";
+        $systems = new Systems();
+        $osInfo = $systems->getOSInfo();
+        echo "🔍 Detected OS: {$osInfo['os']}\n";
+        
+        if (!$this->checkDovecotSieveRequirements($systems)) {
             return;
         }
         
         if ($username === 'all') {
             $this->setupSieveRulesForAllUsers();
+            return;
+        }
+        
+        // Check if Sieve is actually needed
+        $quarantineMethod = $this->config['postfix']['spam_handling']['quarantine_method'] ?? 'system_quarantine';
+        if ($quarantineMethod !== 'user_maildir') {
+            echo "ℹ️  Sieve rules not needed for quarantine method: {$quarantineMethod}\n";
             return;
         }
         
@@ -967,13 +976,13 @@ EOF;
     }
     
     /**
-     * Check and install Dovecot Sieve requirements
+     * Check Dovecot Sieve requirements
      */
-    private function checkAndInstallSieveRequirements(): bool
+    private function checkDovecotSieveRequirements(Systems $systems): bool
     {
         echo "🔍 Checking Dovecot Sieve requirements...\n";
         
-        // Check if Dovecot is installed
+        // Check if Dovecot is running
         exec("systemctl is-active dovecot 2>/dev/null", $output, $returnCode);
         if ($returnCode !== 0) {
             echo "❌ Dovecot is not running. Please install and start Dovecot first.\n";
@@ -981,109 +990,33 @@ EOF;
         }
         echo "✅ Dovecot is running\n";
         
+        // Check if Sieve is needed based on config
+        $quarantineMethod = $this->config['postfix']['spam_handling']['quarantine_method'] ?? 'system_quarantine';
+        if ($quarantineMethod !== 'user_maildir') {
+            echo "ℹ️  Sieve not required for quarantine method: {$quarantineMethod}\n";
+            return false;
+        }
+        
         // Check if sievec command exists
         exec("which sievec 2>/dev/null", $sievecPath, $sievecReturn);
         if ($sievecReturn !== 0) {
-            echo "📦 Installing Dovecot Pigeonhole (Sieve)...\n";
+            $allowModification = $this->config['postfix']['allow_modification'] ?? false;
             
-            // Try different package managers
-            $installCommands = [
-                'dnf install -y dovecot-pigeonhole',
-                'yum install -y dovecot-pigeonhole',
-                'apt-get install -y dovecot-sieve dovecot-managesieved'
-            ];
-            
-            $installed = false;
-            foreach ($installCommands as $cmd) {
-                exec($cmd . ' 2>/dev/null', $installOutput, $installReturn);
-                if ($installReturn === 0) {
-                    echo "✅ Installed Dovecot Sieve successfully\n";
-                    $installed = true;
-                    break;
+            if ($allowModification) {
+                echo "📦 Installing Dovecot Sieve...\n";
+                if ($this->installDovecotSieve($systems)) {
+                    echo "✅ Dovecot Sieve installed successfully\n";
+                } else {
+                    echo "❌ Failed to install Dovecot Sieve\n";
+                    return false;
                 }
-            }
-            
-            if (!$installed) {
-                echo "❌ Failed to install Dovecot Sieve. Please install manually:\n";
-                echo "  Rocky/RHEL: dnf install dovecot-pigeonhole\n";
-                echo "  Ubuntu/Debian: apt-get install dovecot-sieve dovecot-managesieved\n";
+            } else {
+                echo "❌ Dovecot Sieve not found and auto-installation disabled.\n";
+                $this->showSieveInstallInstructions($systems);
                 return false;
             }
         } else {
-            echo "✅ Dovecot Sieve command is available\n";
-        }
-        
-        // Verify Sieve plugin files exist
-        $sievePluginPaths = [
-            '/usr/lib64/dovecot/lib90_sieve_plugin.so',
-            '/usr/lib64/dovecot/lib20_sieve_plugin.so',
-            '/usr/lib/dovecot/lib90_sieve_plugin.so',
-            '/usr/lib/dovecot/lib20_sieve_plugin.so'
-        ];
-        
-        $pluginFound = false;
-        foreach ($sievePluginPaths as $pluginPath) {
-            if (file_exists($pluginPath)) {
-                echo "✅ Found Sieve plugin: {$pluginPath}\n";
-                $pluginFound = true;
-                break;
-            }
-        }
-        
-        if (!$pluginFound) {
-            echo "❌ Sieve plugin files not found. Checking what was installed...\n";
-            exec('find /usr/lib* -name "*sieve*" 2>/dev/null', $findOutput);
-            if (!empty($findOutput)) {
-                echo "ℹ️  Found Sieve-related files:\n";
-                foreach ($findOutput as $file) {
-                    echo "    {$file}\n";
-                }
-            }
-            echo "⚠️  Sieve plugin may not work properly\n";
-        }
-        
-        // Check version compatibility
-        exec('dovecot --version 2>/dev/null', $dovecotVersion);
-        exec('rpm -q dovecot dovecot-pigeonhole 2>/dev/null', $packageVersions);
-        
-        if (!empty($dovecotVersion) && !empty($packageVersions)) {
-            echo "ℹ️  Dovecot version: " . implode(' ', $dovecotVersion) . "\n";
-            foreach ($packageVersions as $pkg) {
-                echo "ℹ️  Package: {$pkg}\n";
-            }
-            
-            // Check for version mismatch
-            $dovecotPkg = array_filter($packageVersions, function($pkg) { return strpos($pkg, 'dovecot-2') === 0; });
-            $pigeonholePkg = array_filter($packageVersions, function($pkg) { return strpos($pkg, 'dovecot-pigeonhole') === 0; });
-            
-            if (!empty($dovecotPkg) && !empty($pigeonholePkg)) {
-                $dovecotVer = reset($dovecotPkg);
-                $pigeonholeVer = reset($pigeonholePkg);
-                
-                // Extract version numbers for comparison
-                preg_match('/dovecot-([0-9.]+)/', $dovecotVer, $doveMatches);
-                preg_match('/dovecot-pigeonhole-([0-9.]+)/', $pigeonholeVer, $pigeonMatches);
-                
-                if (!empty($doveMatches[1]) && !empty($pigeonMatches[1])) {
-                    if ($doveMatches[1] !== $pigeonMatches[1]) {
-                        echo "⚠️  WARNING: Version mismatch detected!\n";
-                        echo "    Dovecot: {$doveMatches[1]}\n";
-                        echo "    Pigeonhole: {$pigeonMatches[1]}\n";
-                        echo "    This may cause symbol errors. Consider reinstalling matching versions.\n";
-                        
-                        // Offer to fix version mismatch
-                        echo "🔧 Attempting to fix version mismatch...\n";
-                        exec('dnf reinstall -y dovecot dovecot-pigeonhole 2>/dev/null', $reinstallOutput, $reinstallReturn);
-                        if ($reinstallReturn === 0) {
-                            echo "✅ Reinstalled packages with matching versions\n";
-                        } else {
-                            echo "❌ Failed to reinstall packages\n";
-                        }
-                    } else {
-                        echo "✅ Dovecot and Pigeonhole versions match\n";
-                    }
-                }
-            }
+            echo "✅ Dovecot Sieve is available\n";
         }
         
         // Configure Dovecot for Sieve
@@ -1093,120 +1026,97 @@ EOF;
     }
     
     /**
+     * Install Dovecot Sieve based on OS
+     */
+    private function installDovecotSieve(Systems $systems): bool
+    {
+        $osInfo = $systems->getOSInfo();
+        $osName = strtolower($osInfo['os']);
+        
+        if (stripos($osName, 'linux') !== false) {
+            // Try Rocky/RHEL first
+            exec('dnf install -y dovecot-pigeonhole 2>/dev/null', $output, $return);
+            if ($return === 0) return true;
+            
+            // Try older RHEL
+            exec('yum install -y dovecot-pigeonhole 2>/dev/null', $output, $return);
+            if ($return === 0) return true;
+            
+            // Try Debian/Ubuntu
+            exec('apt-get update && apt-get install -y dovecot-sieve dovecot-managesieved 2>/dev/null', $output, $return);
+            if ($return === 0) return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Show manual installation instructions
+     */
+    private function showSieveInstallInstructions(Systems $systems): void
+    {
+        echo "\n📝 Manual Installation Required:\n";
+        echo "Dovecot Sieve is required for user_maildir quarantine method.\n\n";
+        
+        $osInfo = $systems->getOSInfo();
+        if (stripos($osInfo['os'], 'linux') !== false) {
+            echo "Rocky/RHEL: dnf install dovecot-pigeonhole\n";
+            echo "Ubuntu/Debian: apt-get install dovecot-sieve dovecot-managesieved\n";
+        }
+        
+        echo "\nAfter installation, run this command again.\n";
+        echo "Or set 'allow_modification' => true in config.php for auto-installation.\n";
+    }
+    
+    /**
      * Configure Dovecot for Sieve support
      */
     private function configureDovecotSieve(): void
     {
         echo "⚙️  Configuring Dovecot Sieve...\n";
         
-        // Enable ManageSieve protocol in main dovecot.conf
-        $dovecotConf = '/etc/dovecot/dovecot.conf';
-        if (file_exists($dovecotConf)) {
-            $content = file_get_contents($dovecotConf);
-            if (strpos($content, 'protocols') !== false) {
-                // Add sieve to protocols if not already there
-                if (strpos($content, 'sieve') === false) {
-                    $content = preg_replace('/^(#?protocols\s*=.*?)$/m', '$1 sieve', $content);
-                    $content = str_replace('#protocols', 'protocols', $content);
-                    file_put_contents($dovecotConf, $content);
-                    echo "✅ Enabled sieve protocol in dovecot.conf\n";
-                }
-            }
-        }
-        
-        // Enable ManageSieve service in 20-managesieve.conf
-        $managesieveConf = '/etc/dovecot/conf.d/20-managesieve.conf';
-        if (file_exists($managesieveConf)) {
-            $content = file_get_contents($managesieveConf);
-            
-            // Uncomment ManageSieve service configuration
-            $content = str_replace('#service managesieve-login', 'service managesieve-login', $content);
-            $content = str_replace('#  inet_listener sieve', '  inet_listener sieve', $content);
-            $content = str_replace('#    port = 4190', '    port = 4190', $content);
-            $content = preg_replace('/#(\s*})/', '$1', $content); // Uncomment closing braces
-            
-            file_put_contents($managesieveConf, $content);
-            echo "✅ Enabled ManageSieve service in 20-managesieve.conf\n";
-        }
-        
-        // Create Sieve configuration file
+        $allowModification = $this->config['postfix']['allow_modification'] ?? false;
         $sieveConfigFile = '/etc/dovecot/conf.d/99-cyford-sieve.conf';
         
         if (!file_exists($sieveConfigFile)) {
-            $sieveConfig = <<<'DOVECOT'
+            if ($allowModification) {
+                $sieveConfig = <<<'DOVECOT'
 # Cyford Web Armor Sieve Configuration
-# Auto-generated - Safe to remove if not needed
-
-# CRITICAL: Explicitly override IMAP to NOT load sieve plugin
-protocol imap {
-  mail_plugins = 
-}
-
-# Enable Sieve plugin for LDA (Local Delivery Agent)
 protocol lda {
   mail_plugins = $mail_plugins sieve
 }
 
-# Enable Sieve plugin for LMTP
 protocol lmtp {
   mail_plugins = $mail_plugins sieve
 }
 
-# Sieve plugin settings
 plugin {
   sieve = ~/.dovecot.sieve
   sieve_dir = ~/sieve
-  sieve_max_script_size = 1M
-  sieve_max_actions = 32
-  sieve_max_redirects = 4
 }
 DOVECOT;
-            
-            file_put_contents($sieveConfigFile, $sieveConfig);
-            echo "✅ Created Sieve configuration file: {$sieveConfigFile}\n";
+                
+                file_put_contents($sieveConfigFile, $sieveConfig);
+                echo "✅ Created Sieve configuration: {$sieveConfigFile}\n";
+                
+                // Test and reload Dovecot
+                exec('doveconf -n > /dev/null 2>&1', $testOutput, $testReturn);
+                if ($testReturn === 0) {
+                    exec('systemctl reload dovecot 2>/dev/null');
+                    echo "✅ Dovecot configuration reloaded\n";
+                } else {
+                    echo "❌ Dovecot configuration test failed\n";
+                }
+            } else {
+                echo "❌ Auto-configuration disabled. Please create {$sieveConfigFile} manually.\n";
+                echo "Required configuration:\n";
+                echo "protocol lda { mail_plugins = \$mail_plugins sieve }\n";
+                echo "protocol lmtp { mail_plugins = \$mail_plugins sieve }\n";
+                echo "plugin { sieve = ~/.dovecot.sieve; sieve_dir = ~/sieve }\n";
+            }
         } else {
-            echo "ℹ️  Sieve configuration already exists\n";
+            echo "✅ Sieve configuration already exists\n";
         }
-        
-        // Test configuration before restarting
-        exec('doveconf -n > /dev/null 2>&1', $testOutput, $testReturn);
-        if ($testReturn !== 0) {
-            echo "❌ Dovecot configuration test failed, rolling back changes\n";
-            unlink($sieveConfigFile);
-            return;
-        }
-        
-        // Restart Dovecot to apply changes
-        exec('systemctl restart dovecot 2>/dev/null', $restartOutput, $restartReturn);
-        if ($restartReturn === 0) {
-            echo "✅ Restarted Dovecot successfully\n";
-        } else {
-            echo "❌ Dovecot restart failed, rolling back changes\n";
-            unlink($sieveConfigFile);
-            exec('systemctl restart dovecot 2>/dev/null');
-            return;
-        }
-        
-        // Verify Dovecot is running without errors
-        sleep(2);
-        exec('systemctl is-active dovecot 2>/dev/null', $statusOutput, $statusReturn);
-        if ($statusReturn !== 0) {
-            echo "❌ Dovecot failed to start properly, rolling back changes\n";
-            unlink($sieveConfigFile);
-            exec('systemctl restart dovecot 2>/dev/null');
-            return;
-        }
-        
-        // Test for IMAP sieve loading errors
-        exec('journalctl -u dovecot --since "1 minute ago" | grep -i "sieve.*symbol" 2>/dev/null', $errorCheck);
-        if (!empty($errorCheck)) {
-            echo "❌ Detected sieve symbol errors, rolling back changes\n";
-            unlink($sieveConfigFile);
-            exec('systemctl restart dovecot 2>/dev/null');
-            return;
-        }
-        
-        echo "✅ Dovecot Sieve configuration completed successfully\n";
     }
 
     /**
@@ -1267,6 +1177,8 @@ DOVECOT;
         echo "  📊 Total: " . count($users) . " users\n";
     }
     
+
+    
     /**
      * Setup Sieve rules for a single user
      */
@@ -1278,64 +1190,41 @@ DOVECOT;
             throw new Exception("User {$username} does not exist");
         }
         
+
+        
         // Get user's home directory
         $homeDir = "/home/{$username}";
         if (!is_dir($homeDir)) {
             throw new Exception("Home directory {$homeDir} does not exist");
         }
         
-        // Create sieve directory if it doesn't exist
-        $sieveDir = "{$homeDir}/.dovecot.sieve.d";
-        if (!is_dir($sieveDir)) {
-            exec("sudo -u {$username} mkdir -p {$sieveDir}");
-            echo "  📁 Created sieve directory: {$sieveDir}\n";
-        }
-        
         // Path to main sieve script
         $sieveScript = "{$homeDir}/.dovecot.sieve";
-        $spamSieveScript = "{$sieveDir}/spam-filter.sieve";
-        
-        // Create simple main sieve script directly (no subdirectory approach)
-        $spamRules = $this->generateSpamSieveRules();
         
         if (file_exists($sieveScript)) {
             $existingContent = file_get_contents($sieveScript);
             if (strpos($existingContent, 'X-Spam-Flag') !== false) {
-                echo "  ℹ️  Spam filtering rules already exist in: {$sieveScript}\n";
+                echo "  ℹ️  Spam filtering rules already exist\n";
                 return;
             }
         }
         
-        // Write spam filtering rules directly to main sieve script
+        // Create spam filtering rules
+        $spamRules = $this->generateSpamSieveRules();
         file_put_contents($sieveScript, $spamRules);
         exec("chown {$username}:{$username} {$sieveScript}");
         exec("chmod 644 {$sieveScript}");
         echo "  ✅ Created sieve script: {$sieveScript}\n";
-        
-        // Create sieve directory for future use
-        $sieveDir = "{$homeDir}/sieve";
-        if (!is_dir($sieveDir)) {
-            exec("sudo -u {$username} mkdir -p {$sieveDir}");
-            echo "  📁 Created sieve directory: {$sieveDir}\n";
-        }
         
         // Compile sieve script
         exec("sudo -u {$username} sievec {$sieveScript} 2>/dev/null", $compileOutput, $compileReturn);
         if ($compileReturn === 0) {
             echo "  ✅ Compiled sieve script successfully\n";
         } else {
-            echo "  ⚠️  Sieve compilation may have issues\n";
-            // Try manual compilation
-            exec("sievec {$sieveScript} 2>&1", $manualCompile, $manualReturn);
-            if ($manualReturn === 0) {
-                exec("chown {$username}:{$username} {$sieveScript}c");
-                echo "  ✅ Manual compilation successful\n";
-            } else {
-                echo "  ❌ Compilation failed: " . implode(' ', $manualCompile) . "\n";
-            }
+            echo "  ℹ️  Dovecot will compile at runtime\n";
         }
         
-        // Reload Dovecot to pick up changes
+        // Reload Dovecot
         exec("systemctl reload dovecot 2>/dev/null");
         echo "  🔄 Reloaded Dovecot configuration\n";
     }
@@ -1347,13 +1236,9 @@ DOVECOT;
     {
         return <<<'SIEVE'
 # Cyford Web Armor Spam Filtering Rules
-# Auto-generated - Do not edit manually
-
 require ["fileinto", "mailbox"];
 
-# Move emails marked as spam by Cyford Web Armor
 if header :contains "X-Spam-Flag" "YES" {
-    # Create Spambox folder if it doesn't exist
     if not mailboxexists "Spambox" {
         mailboxcreate "Spambox";
     }
@@ -1361,16 +1246,6 @@ if header :contains "X-Spam-Flag" "YES" {
     stop;
 }
 
-# Also check for SpamAssassin compatibility
-if header :contains "X-Spam-Status" "Yes" {
-    if not mailboxexists "Spambox" {
-        mailboxcreate "Spambox";
-    }
-    fileinto "Spambox";
-    stop;
-}
-
-# Move emails with ***SPAM*** in subject
 if header :contains "Subject" "***SPAM***" {
     if not mailboxexists "Spambox" {
         mailboxcreate "Spambox";
