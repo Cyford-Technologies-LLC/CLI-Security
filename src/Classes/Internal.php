@@ -1266,9 +1266,9 @@ DOVECOT;
         
         $content = file_get_contents($mainConfig);
         
-        // Check if already configured
-        if (strpos($content, 'mailbox_command') !== false && strpos($content, 'dovecot-lda') !== false) {
-            echo "✅ Postfix already configured for dovecot-lda\n";
+        // Check if already configured with wrapper
+        if (strpos($content, 'cyford-dovecot-lda') !== false) {
+            echo "✅ Postfix already configured with Cyford dovecot-lda wrapper\n";
             return;
         }
         
