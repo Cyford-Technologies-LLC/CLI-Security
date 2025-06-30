@@ -68,6 +68,10 @@ class Internal
                 $this->setupSieveRules($args['username'] ?? '');
                 break;
                 
+            case 'setup-dovecot-sieve':
+                $this->setupDovecotSieve();
+                break;
+                
             default:
                 $this->showHelp();
         }
@@ -283,7 +287,7 @@ class Internal
             // 1. Create sudoers rule
             echo "📝 Creating sudoers rule...\n";
             $sudoersContent = "# Cyford Security permissions\n";
-            $sudoersContent .= "report-ip ALL=(ALL) NOPASSWD: /bin/mkdir, /bin/chown, /bin/chmod\n";
+            $sudoersContent .= "report-ip ALL=(ALL) NOPASSWD: /bin/mkdir, /bin/chown, /bin/chmod, /usr/lib/dovecot/dovecot-lda, /usr/libexec/dovecot/dovecot-lda\n";
             
             $sudoersFile = '/etc/sudoers.d/cyford-security';
             if (file_put_contents($sudoersFile, $sudoersContent)) {
@@ -1296,6 +1300,145 @@ DOVECOT;
         exec('systemctl reload postfix 2>/dev/null');
         echo "✅ Postfix reloaded\n";
     }
+    
+    /**
+     * Complete Dovecot Sieve setup
+     */
+    private function setupDovecotSieve(): void
+    {
+        echo "🚀 Starting complete Dovecot Sieve setup...\n";
+        
+        $systems = new Systems();
+        $osInfo = $systems->getOSInfo();
+        echo "🔍 Detected OS: {$osInfo['os']}\n";
+        
+        $allowModification = $this->config['postfix']['allow_modification'] ?? false;
+        if (!$allowModification) {
+            echo "❌ Auto-configuration disabled. Set 'allow_modification' => true in config.php\n";
+            return;
+        }
+        
+        try {
+            // 1. Check/Install Dovecot
+            echo "\n📦 Step 1: Installing Dovecot and Sieve...\n";
+            $this->installDovecotAndSieve($systems);
+            
+            // 2. Configure Dovecot Sieve
+            echo "\n⚙️  Step 2: Configuring Dovecot Sieve...\n";
+            $this->configureDovecotSieve();
+            
+            // 3. Setup permissions
+            echo "\n🔒 Step 3: Setting up permissions...\n";
+            $this->setupDovecotPermissions();
+            
+            // 4. Configure Postfix for dovecot-lda
+            echo "\n📧 Step 4: Configuring Postfix...\n";
+            $this->configurePostfixForDovecotLDA();
+            
+            echo "\n🎉 Dovecot Sieve setup completed successfully!\n";
+            echo "\n📝 Next steps:\n";
+            echo "  1. Set requeue_method = 'dovecot-lda' in config.php\n";
+            echo "  2. Run: --command=setup-sieve-rules --username=all\n";
+            echo "  3. Test spam filtering\n";
+            
+        } catch (Exception $e) {
+            echo "❌ Setup failed: " . $e->getMessage() . "\n";
+        }
+    }
+    
+    /**
+     * Install Dovecot and Sieve
+     */
+    private function installDovecotAndSieve(Systems $systems): void
+    {
+        // Check if Dovecot is installed
+        exec('which dovecot 2>/dev/null', $dovecotPath, $dovecotExists);
+        if ($dovecotExists !== 0) {
+            echo "📦 Installing Dovecot...\n";
+            if (!$this->installPackage('dovecot', $systems)) {
+                throw new Exception('Failed to install Dovecot');
+            }
+        } else {
+            echo "✅ Dovecot is already installed\n";
+        }
+        
+        // Check if Sieve is installed
+        exec('which sievec 2>/dev/null', $sievecPath, $sievecExists);
+        if ($sievecExists !== 0) {
+            echo "📦 Installing Dovecot Sieve...\n";
+            if (!$this->installDovecotSieve($systems)) {
+                throw new Exception('Failed to install Dovecot Sieve');
+            }
+        } else {
+            echo "✅ Dovecot Sieve is already installed\n";
+        }
+        
+        // Start Dovecot if not running
+        exec('systemctl is-active dovecot 2>/dev/null', $output, $returnCode);
+        if ($returnCode !== 0) {
+            echo "🚀 Starting Dovecot...\n";
+            exec('systemctl enable dovecot && systemctl start dovecot 2>/dev/null');
+        }
+    }
+    
+    /**
+     * Install package based on OS
+     */
+    private function installPackage(string $package, Systems $systems): bool
+    {
+        $osInfo = $systems->getOSInfo();
+        $osName = strtolower($osInfo['os']);
+        
+        if (stripos($osName, 'linux') !== false) {
+            // Try Rocky/RHEL first
+            exec("dnf install -y {$package} 2>/dev/null", $output, $return);
+            if ($return === 0) return true;
+            
+            // Try older RHEL
+            exec("yum install -y {$package} 2>/dev/null", $output, $return);
+            if ($return === 0) return true;
+            
+            // Try Debian/Ubuntu
+            exec("apt-get update && apt-get install -y {$package} 2>/dev/null", $output, $return);
+            if ($return === 0) return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Setup Dovecot permissions for report-ip user
+     */
+    private function setupDovecotPermissions(): void
+    {
+        // Add report-ip to dovecot group
+        exec('usermod -a -G dovecot report-ip 2>/dev/null');
+        echo "✅ Added report-ip to dovecot group\n";
+        
+        // Create dovecot log directory with proper permissions
+        $logDir = '/var/log/dovecot';
+        if (!is_dir($logDir)) {
+            mkdir($logDir, 0755, true);
+        }
+        exec("chown dovecot:dovecot {$logDir}");
+        exec("chmod 755 {$logDir}");
+        echo "✅ Fixed Dovecot log directory permissions\n";
+        
+        // Update sudoers for dovecot-lda
+        $sudoersFile = '/etc/sudoers.d/cyford-security';
+        if (file_exists($sudoersFile)) {
+            $content = file_get_contents($sudoersFile);
+            if (strpos($content, 'dovecot-lda') === false) {
+                $content = str_replace(
+                    'report-ip ALL=(ALL) NOPASSWD: /bin/mkdir, /bin/chown, /bin/chmod',
+                    'report-ip ALL=(ALL) NOPASSWD: /bin/mkdir, /bin/chown, /bin/chmod, /usr/lib/dovecot/dovecot-lda, /usr/libexec/dovecot/dovecot-lda',
+                    $content
+                );
+                file_put_contents($sudoersFile, $content);
+                echo "✅ Updated sudoers for dovecot-lda access\n";
+            }
+        }
+    }
 
     /**
      * Setup Sieve rules for all users
@@ -1501,6 +1644,7 @@ SIEVE;
         echo "  create-user        - Create mail user (--username=user --password=pass)\n";
         echo "  setup-user-permissions - Setup user directory permissions for postfix (--username=user or --username=all)\n";
         echo "  setup-sieve-rules      - Setup Dovecot Sieve spam filtering rules (--username=user or --username=all)\n";
+        echo "  setup-dovecot-sieve    - Complete Dovecot Sieve setup (install, configure, permissions)\n";
         echo "  test-database      - Test database connection and functionality\n";
         echo "  view-spam-patterns - View spam patterns (--limit=20)\n";
         echo "  clear-spam-pattern - Remove spam pattern (--pattern_id=123)\n";
@@ -1515,6 +1659,7 @@ SIEVE;
         echo "  php index.php --input_type=internal --command=setup-permissions\n";
         echo "  php index.php --input_type=internal --command=setup-user-permissions --username=all\n";
         echo "  php index.php --input_type=internal --command=setup-sieve-rules --username=all\n";
+        echo "  php index.php --input_type=internal --command=setup-dovecot-sieve\n";
         echo "  php index.php --input_type=internal --command=setup-database\n";
         echo "  php index.php --input_type=internal --command=stats\n";
         echo "  php index.php --input_type=internal --command=test-spam-filter --subject='Hello' --body='Test message'\n";
