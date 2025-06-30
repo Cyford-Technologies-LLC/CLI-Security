@@ -1291,8 +1291,12 @@ DOVECOT;
         $content = preg_replace('/^mailbox_command\s*=.*$/m', '', $content);
         $content = preg_replace('/^home_mailbox\s*=.*$/m', '', $content);
         
-        // Add dovecot-lda configuration (extract username from recipient)
-        $content .= "\n# Dovecot LDA for Sieve filtering\nmailbox_command = {$ldaPath} -d \$USER -f \$SENDER\n";
+        // Create wrapper script for dovecot-lda
+        $wrapperScript = '/usr/local/bin/cyford-dovecot-lda';
+        $this->createDovecotLDAWrapper($ldaPath, $wrapperScript);
+        
+        // Add dovecot-lda configuration using wrapper
+        $content .= "\n# Dovecot LDA for Sieve filtering\nmailbox_command = {$wrapperScript} \$SENDER \$USER\n";
         
         file_put_contents($mainConfig, $content);
         echo "✅ Configured Postfix for dovecot-lda: {$ldaPath}\n";
@@ -1410,17 +1414,16 @@ DOVECOT;
     /**
      * Create dovecot-lda wrapper script
      */
-    private function createDovecotLDAWrapper(): void
+    private function createDovecotLDAWrapper(string $ldaPath = null, string $wrapperScript = '/usr/local/bin/cyford-dovecot-lda'): void
     {
-        $wrapperScript = '/usr/local/bin/cyford-dovecot-lda';
-        
-        // Find dovecot-lda path
-        $ldaPaths = ['/usr/lib/dovecot/dovecot-lda', '/usr/libexec/dovecot/dovecot-lda'];
-        $ldaPath = null;
-        foreach ($ldaPaths as $path) {
-            if (file_exists($path)) {
-                $ldaPath = $path;
-                break;
+        if (!$ldaPath) {
+            // Find dovecot-lda path
+            $ldaPaths = ['/usr/lib/dovecot/dovecot-lda', '/usr/libexec/dovecot/dovecot-lda'];
+            foreach ($ldaPaths as $path) {
+                if (file_exists($path)) {
+                    $ldaPath = $path;
+                    break;
+                }
             }
         }
         
@@ -1432,13 +1435,17 @@ DOVECOT;
         $wrapperContent = <<<BASH
 #!/bin/bash
 # Cyford Security dovecot-lda wrapper
-# Runs outside Postfix chroot with proper permissions
+# Extracts username from email address for proper delivery
+
+# \$1 = sender, \$2 = recipient (full email)
+SENDER="\$1"
+RECIPIENT="\$2"
 
 # Extract username from email address
-USER=\$(echo "\$2" | cut -d'@' -f1)
+USERNAME=\$(echo "\$RECIPIENT" | cut -d'@' -f1)
 
-# Run dovecot-lda as the target user
-exec sudo -u "\$USER" {$ldaPath} -f "\$1" -a "\$2"
+# Run dovecot-lda with proper arguments
+exec {$ldaPath} -d "\$USERNAME" -f "\$SENDER"
 BASH;
         
         file_put_contents($wrapperScript, $wrapperContent);
