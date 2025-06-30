@@ -1291,8 +1291,8 @@ DOVECOT;
         $content = preg_replace('/^mailbox_command\s*=.*$/m', '', $content);
         $content = preg_replace('/^home_mailbox\s*=.*$/m', '', $content);
         
-        // Add dovecot-lda configuration
-        $content .= "\n# Dovecot LDA for Sieve filtering\nmailbox_command = {$ldaPath} -f \$SENDER -a \$RECIPIENT\n";
+        // Add dovecot-lda configuration (extract username from recipient)
+        $content .= "\n# Dovecot LDA for Sieve filtering\nmailbox_command = {$ldaPath} -d \$USER -f \$SENDER\n";
         
         file_put_contents($mainConfig, $content);
         echo "✅ Configured Postfix for dovecot-lda: {$ldaPath}\n";

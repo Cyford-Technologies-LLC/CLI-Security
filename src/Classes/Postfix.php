@@ -1338,7 +1338,10 @@ EOF;
             throw new RuntimeException("dovecot-lda not found");
         }
         
-        $command = "{$ldaPath} -f '' -a {$recipient}";
+        // Extract username from recipient
+        $username = explode('@', $recipient)[0];
+        
+        $command = "{$ldaPath} -d {$username} -f ''";
         $logger->info("Executing dovecot-lda command: {$command}");
         
         $process = proc_open($command, [
