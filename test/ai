@@ -32,5 +32,49 @@ Jun 26 05:23:09 mail postfix/smtpd[11741]: Anonymous TLS connection established 
 Jun 26 05:23:09 mail postfix/smtpd[11741]: NOQUEUE: reject: RCPT from m43-13.mailgun.net[69.72.43.13]: 554 5.7.1 <root@mail.cyfordtechnologies.com>: Relay access denied; from=<> to=<root@mail.cyfordtechnologies.com> proto=ESMTP helo=<m43-13.mailgun.net>
 Jun 26 05:23:09 mail postfix/smtpd[11741]: disconnect from m43-13.mailgun.net[69.72.43.13] ehlo=2 starttls=1 mail=1 rcpt=0/1 quit=1 commands=5/6
 
-@
-workspace
+latest
+
+For the spam folder task, modify your security-filter script to move spam emails directly to the spam folder instead of requeuing them. In your spam handling code, when an email is detected as spam, deliver it to ~/Maildir/.Spam/ instead of adding X-Spam headers and requeuing.
+
+This bypasses the need for Sieve entirely and accomplishes your mission directly
+
+
+
+You're absolutely right. Here's the configurable approach:
+
+// In config.php add:
+'postfix' => [
+    'spam_handling' => [
+        'quarantine_method' => 'maildir_spam', // or 'requeue'
+        'maildir_path' => '/home/{user}/Maildir-cyford',
+        'spam_folder' => '.Spam'
+    ]
+]
+
+// In your spam detection code:
+if ($isSpam) {
+    $config = $this->config['postfix']['spam_handling'];
+    if ($config['quarantine_method'] === 'maildir_spam') {
+        $maildirPath = str_replace('{user}', $username, $config['maildir_path']);
+        $spamDir = $maildirPath . '/' . $config['spam_folder'];
+
+        if (!is_dir($spamDir)) {
+            mkdir($spamDir . '/cur', 0755, true);
+            mkdir($spamDir . '/new', 0755, true);
+            mkdir($spamDir . '/tmp', 0755, true);
+        }
+
+        $filename = time() . '.' . getmypid() . '.spam';
+        file_put_contents($spamDir . '/new/' . $filename, $emailContent);
+        exit(0);
+    }
+    // Otherwise fall back to requeue method
+}
+
+
+
+
+
+
+
+
