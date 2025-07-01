@@ -96,6 +96,22 @@ class Internal
                 $this->checkCronLog();
                 break;
                 
+            case 'backup-config':
+                $this->backupConfig();
+                break;
+                
+            case 'restore-config':
+                $this->restoreConfig($args['backup'] ?? null);
+                break;
+                
+            case 'merge-config':
+                $this->mergeConfig();
+                break;
+                
+            case 'list-backups':
+                $this->listBackups();
+                break;
+                
             default:
                 $this->showHelp();
         }
@@ -1877,6 +1893,42 @@ SIEVE;
     {
         $systems = new Systems();
         $systems->checkCronLog();
+    }
+    
+    /**
+     * Backup config settings
+     */
+    private function backupConfig(): void
+    {
+        $systems = new Systems();
+        $systems->backupConfig();
+    }
+    
+    /**
+     * Restore config from backup
+     */
+    private function restoreConfig(?string $backupFile): void
+    {
+        $systems = new Systems();
+        $systems->restoreConfig($backupFile);
+    }
+    
+    /**
+     * Merge config after git pull
+     */
+    private function mergeConfig(): void
+    {
+        $systems = new Systems();
+        $systems->mergeConfigAfterGitPull();
+    }
+    
+    /**
+     * List config backups
+     */
+    private function listBackups(): void
+    {
+        $systems = new Systems();
+        $systems->listConfigBackups();
     }
 
     /**

@@ -398,26 +398,31 @@ class Systems
     {
         echo "🔧 Setting up task queue system...\n";
         
-        // Create task queue directory with proper permissions
+        // Create task queue in project directory (chroot accessible)
+        $projectTasksFile = '/usr/local/share/cyford/security/tasks.json';
+        if (!file_exists($projectTasksFile)) {
+            file_put_contents($projectTasksFile, '[]');
+        }
+        exec("chown report-ip:postfix {$projectTasksFile}");
+        exec("chmod 664 {$projectTasksFile}");
+        echo "✅ Created task queue in project directory: {$projectTasksFile}\n";
+        
+        // Create symlink from expected location to project file
         $queueDir = '/var/spool/cyford-security';
         if (!is_dir($queueDir)) {
             mkdir($queueDir, 0755, true);
-            echo "✅ Created queue directory: {$queueDir}\n";
         }
         
-        // Set permissions for report-ip user to write tasks
-        exec("chown root:postfix {$queueDir}");
-        exec("chmod 775 {$queueDir}");
-        echo "✅ Set queue directory permissions for report-ip user\n";
-        
-        // Create tasks.json file with proper permissions
-        $tasksFile = $queueDir . '/tasks.json';
-        if (!file_exists($tasksFile)) {
-            file_put_contents($tasksFile, '[]');
+        $symlinkTarget = $queueDir . '/tasks.json';
+        if (file_exists($symlinkTarget)) {
+            unlink($symlinkTarget);
         }
-        exec("chown root:postfix {$tasksFile}");
-        exec("chmod 664 {$tasksFile}");
-        echo "✅ Set tasks file permissions\n";
+        
+        if (symlink($projectTasksFile, $symlinkTarget)) {
+            echo "✅ Created symlink: {$symlinkTarget} -> {$projectTasksFile}\n";
+        } else {
+            echo "⚠️  Failed to create symlink, using project file directly\n";
+        }
         
         // Create task processor script
         $this->createTaskProcessor($config);
@@ -462,7 +467,7 @@ class Systems
     {
         echo "📊 Checking task queue status...\n";
         
-        $queueFile = '/var/spool/cyford-security/tasks.json';
+        $queueFile = '/usr/local/share/cyford/security/tasks.json';
         
         if (file_exists($queueFile)) {
             $tasks = json_decode(file_get_contents($queueFile), true) ?: [];
@@ -536,7 +541,8 @@ class Systems
      */
     public function addTask(string $type, array $data, string $schedule = 'now'): string
     {
-        $queueFile = '/var/spool/cyford-security/tasks.json';
+        // Use project directory for chroot compatibility
+        $queueFile = '/usr/local/share/cyford/security/tasks.json';
         $tasks = [];
         
         if (file_exists($queueFile)) {
@@ -611,6 +617,212 @@ class Systems
     }
     
     /**
+     * Backup current config settings
+     */
+    public function backupConfig(): void
+    {
+        echo "💾 Backing up config settings...\n";
+        
+        $configFile = './config.php';
+        $backupDir = './config-backups';
+        
+        if (!is_dir($backupDir)) {
+            mkdir($backupDir, 0755, true);
+        }
+        
+        $timestamp = date('Y-m-d_H-i-s');
+        $backupFile = "{$backupDir}/config.php.backup_{$timestamp}";
+        
+        if (file_exists($configFile)) {
+            if (copy($configFile, $backupFile)) {
+                echo "✅ Config backed up to: {$backupFile}\n";
+                
+                // Keep only last 10 backups
+                $this->cleanupOldBackups($backupDir, 10);
+            } else {
+                echo "❌ Failed to backup config\n";
+            }
+        } else {
+            echo "❌ Config file not found: {$configFile}\n";
+        }
+    }
+    
+    /**
+     * Restore config from backup or preserve user settings after git pull
+     */
+    public function restoreConfig(?string $backupFile = null): void
+    {
+        echo "🔄 Restoring config settings...\n";
+        
+        $configFile = './config.php';
+        $backupDir = './config-backups';
+        
+        if ($backupFile) {
+            // Restore from specific backup
+            if (file_exists($backupFile)) {
+                if (copy($backupFile, $configFile)) {
+                    echo "✅ Config restored from: {$backupFile}\n";
+                } else {
+                    echo "❌ Failed to restore config from backup\n";
+                }
+            } else {
+                echo "❌ Backup file not found: {$backupFile}\n";
+            }
+        } else {
+            // Auto-restore from latest backup
+            $latestBackup = $this->getLatestBackup($backupDir);
+            if ($latestBackup) {
+                if (copy($latestBackup, $configFile)) {
+                    echo "✅ Config auto-restored from: {$latestBackup}\n";
+                } else {
+                    echo "❌ Failed to auto-restore config\n";
+                }
+            } else {
+                echo "❌ No backup found to restore from\n";
+            }
+        }
+    }
+    
+    /**
+     * Merge user settings with new config after git pull
+     */
+    public function mergeConfigAfterGitPull(): void
+    {
+        echo "🔀 Merging user settings with updated config...\n";
+        
+        $configFile = './config.php';
+        $backupDir = './config-backups';
+        $latestBackup = $this->getLatestBackup($backupDir);
+        
+        if (!$latestBackup) {
+            echo "❌ No backup found to merge from\n";
+            return;
+        }
+        
+        // Load current (new) config
+        $newConfig = include $configFile;
+        
+        // Load backup (user) config
+        $userConfig = include $latestBackup;
+        
+        // Merge user settings into new config
+        $mergedConfig = $this->mergeConfigArrays($newConfig, $userConfig);
+        
+        // Write merged config
+        $configContent = "<?php\n\n// Merged config - User settings preserved after git pull\n// Generated: " . date('Y-m-d H:i:s') . "\n\nreturn " . var_export($mergedConfig, true) . ";\n";
+        
+        if (file_put_contents($configFile, $configContent)) {
+            echo "✅ Config merged successfully\n";
+            echo "💾 Creating backup of merged config...\n";
+            $this->backupConfig();
+        } else {
+            echo "❌ Failed to write merged config\n";
+        }
+    }
+    
+    /**
+     * List available config backups
+     */
+    public function listConfigBackups(): void
+    {
+        echo "📋 Available config backups:\n";
+        
+        $backupDir = './config-backups';
+        
+        if (!is_dir($backupDir)) {
+            echo "❌ No backup directory found\n";
+            return;
+        }
+        
+        $backups = glob($backupDir . '/config.php.backup_*');
+        
+        if (empty($backups)) {
+            echo "❌ No backups found\n";
+            return;
+        }
+        
+        // Sort by modification time (newest first)
+        usort($backups, function($a, $b) {
+            return filemtime($b) - filemtime($a);
+        });
+        
+        foreach ($backups as $backup) {
+            $timestamp = date('Y-m-d H:i:s', filemtime($backup));
+            $size = $this->formatSize(filesize($backup));
+            echo "  • " . basename($backup) . " ({$timestamp}, {$size})\n";
+        }
+    }
+    
+    /**
+     * Recursively merge config arrays, preserving user settings
+     */
+    private function mergeConfigArrays(array $new, array $user): array
+    {
+        $merged = $new;
+        
+        foreach ($user as $key => $value) {
+            if (is_array($value) && isset($merged[$key]) && is_array($merged[$key])) {
+                // Recursively merge arrays
+                $merged[$key] = $this->mergeConfigArrays($merged[$key], $value);
+            } else {
+                // Preserve user setting
+                $merged[$key] = $value;
+            }
+        }
+        
+        return $merged;
+    }
+    
+    /**
+     * Get latest backup file
+     */
+    private function getLatestBackup(string $backupDir): ?string
+    {
+        if (!is_dir($backupDir)) {
+            return null;
+        }
+        
+        $backups = glob($backupDir . '/config.php.backup_*');
+        
+        if (empty($backups)) {
+            return null;
+        }
+        
+        // Sort by modification time (newest first)
+        usort($backups, function($a, $b) {
+            return filemtime($b) - filemtime($a);
+        });
+        
+        return $backups[0];
+    }
+    
+    /**
+     * Clean up old backup files
+     */
+    private function cleanupOldBackups(string $backupDir, int $keepCount): void
+    {
+        $backups = glob($backupDir . '/config.php.backup_*');
+        
+        if (count($backups) <= $keepCount) {
+            return;
+        }
+        
+        // Sort by modification time (oldest first)
+        usort($backups, function($a, $b) {
+            return filemtime($a) - filemtime($b);
+        });
+        
+        // Remove oldest backups
+        $toRemove = array_slice($backups, 0, count($backups) - $keepCount);
+        
+        foreach ($toRemove as $backup) {
+            if (unlink($backup)) {
+                echo "🗑️  Removed old backup: " . basename($backup) . "\n";
+            }
+        }
+    }
+    
+    /**
      * Create task processor script
      */
     private function createTaskProcessor(array $config): void
@@ -623,7 +835,7 @@ class Systems
 // Cyford Security Task Processor
 // Runs as root to handle chroot limitations
 
-$queueFile = '/var/spool/cyford-security/tasks.json';
+$queueFile = '/usr/local/share/cyford/security/tasks.json';
 $logFile = '/var/log/cyford-security/task-processor.log';
 
 function logMessage($message) {
