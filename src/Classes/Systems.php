@@ -392,6 +392,302 @@ class Systems
     }
 
     /**
+     * Setup task queue system with cron job
+     */
+    public function setupTaskQueue(array $config): void
+    {
+        echo "🔧 Setting up task queue system...\n";
+        
+        // Create task queue directory
+        $queueDir = '/var/spool/cyford-security';
+        if (!is_dir($queueDir)) {
+            mkdir($queueDir, 0755, true);
+            echo "✅ Created queue directory: {$queueDir}\n";
+        }
+        
+        // Create task processor script
+        $this->createTaskProcessor($config);
+        
+        // Setup cron job
+        $this->setupCronJob();
+        
+        echo "🎉 Task queue system setup complete!\n";
+    }
+    
+    /**
+     * Check cron job status
+     */
+    public function checkCronStatus(): void
+    {
+        echo "📋 Checking cron job status...\n";
+        
+        exec('crontab -l 2>/dev/null | grep cyford-task-processor', $output, $returnCode);
+        
+        if ($returnCode === 0 && !empty($output)) {
+            echo "✅ Cron job is installed:\n";
+            foreach ($output as $line) {
+                echo "  {$line}\n";
+            }
+        } else {
+            echo "❌ Cron job not found\n";
+        }
+        
+        // Check if processor is running
+        exec('pgrep -f cyford-task-processor', $processes);
+        if (!empty($processes)) {
+            echo "✅ Task processor is running (PID: " . implode(', ', $processes) . ")\n";
+        } else {
+            echo "⚠️  Task processor not currently running\n";
+        }
+    }
+    
+    /**
+     * Check task queue status
+     */
+    public function checkQueueStatus(): void
+    {
+        echo "📊 Checking task queue status...\n";
+        
+        $queueFile = '/var/spool/cyford-security/tasks.json';
+        
+        if (file_exists($queueFile)) {
+            $tasks = json_decode(file_get_contents($queueFile), true) ?: [];
+            echo "📋 Queue file exists: {$queueFile}\n";
+            echo "📊 Pending tasks: " . count($tasks) . "\n";
+            
+            if (!empty($tasks)) {
+                echo "\n🔍 Recent tasks:\n";
+                foreach (array_slice($tasks, -5) as $task) {
+                    echo "  ID: {$task['id']} | Type: {$task['type']} | Created: {$task['created']}\n";
+                }
+            }
+        } else {
+            echo "❌ Queue file not found: {$queueFile}\n";
+        }
+        
+        // Check log file
+        $logFile = '/var/log/cyford-security/task-processor.log';
+        if (file_exists($logFile)) {
+            $logSize = filesize($logFile);
+            echo "📄 Log file: {$logFile} (" . $this->formatSize($logSize) . ")\n";
+        }
+    }
+    
+    /**
+     * Add task to queue with optional scheduling
+     */
+    public function addTask(string $type, array $data, string $schedule = 'now'): string
+    {
+        $queueFile = '/var/spool/cyford-security/tasks.json';
+        $tasks = [];
+        
+        if (file_exists($queueFile)) {
+            $tasks = json_decode(file_get_contents($queueFile), true) ?: [];
+        }
+        
+        $taskId = uniqid('task_', true);
+        $task = [
+            'id' => $taskId,
+            'type' => $type,
+            'data' => $data,
+            'created' => date('Y-m-d H:i:s'),
+            'status' => 'pending',
+            'schedule' => $schedule,
+            'run_after' => $this->calculateRunTime($schedule)
+        ];
+        
+        $tasks[] = $task;
+        file_put_contents($queueFile, json_encode($tasks, JSON_PRETTY_PRINT), LOCK_EX);
+        
+        return $taskId;
+    }
+    
+    /**
+     * Calculate when task should run based on schedule
+     */
+    private function calculateRunTime(string $schedule): string
+    {
+        $now = time();
+        
+        switch ($schedule) {
+            case 'now':
+                return date('Y-m-d H:i:s', $now);
+            case '1hour':
+            case 'hourly':
+                return date('Y-m-d H:i:s', $now + 3600);
+            case '1day':
+            case 'daily':
+                return date('Y-m-d H:i:s', $now + 86400);
+            case '1week':
+            case 'weekly':
+                return date('Y-m-d H:i:s', $now + 604800);
+            default:
+                // Handle custom formats like '30min', '2hours', '3days'
+                if (preg_match('/^(\d+)(min|hour|day)s?$/', $schedule, $matches)) {
+                    $amount = (int)$matches[1];
+                    $unit = $matches[2];
+                    
+                    $multiplier = [
+                        'min' => 60,
+                        'hour' => 3600,
+                        'day' => 86400
+                    ];
+                    
+                    $seconds = $amount * ($multiplier[$unit] ?? 60);
+                    return date('Y-m-d H:i:s', $now + $seconds);
+                }
+                
+                return date('Y-m-d H:i:s', $now);
+        }
+    }
+    
+    /**
+     * Schedule a command to run later
+     */
+    public function scheduleCommand(string $command, array $args, string $schedule): string
+    {
+        return $this->addTask('scheduled_command', [
+            'command' => $command,
+            'args' => $args
+        ], $schedule);
+    }
+    
+    /**
+     * Create task processor script
+     */
+    private function createTaskProcessor(array $config): void
+    {
+        $processorScript = '/usr/local/bin/cyford-task-processor';
+        
+        $script = <<<'PHP'
+#!/usr/bin/php
+<?php
+// Cyford Security Task Processor
+// Runs as root to handle chroot limitations
+
+$queueFile = '/var/spool/cyford-security/tasks.json';
+$logFile = '/var/log/cyford-security/task-processor.log';
+
+function logMessage($message) {
+    global $logFile;
+    $timestamp = date('Y-m-d H:i:s');
+    file_put_contents($logFile, "[{$timestamp}] {$message}\n", FILE_APPEND | LOCK_EX);
+}
+
+if (!file_exists($queueFile)) {
+    exit(0);
+}
+
+$tasks = json_decode(file_get_contents($queueFile), true) ?: [];
+if (empty($tasks)) {
+    exit(0);
+}
+
+$processed = [];
+foreach ($tasks as $task) {
+    if ($task['status'] !== 'pending') {
+        $processed[] = $task;
+        continue;
+    }
+    
+    // Check if task is scheduled for later
+    if (isset($task['run_after']) && strtotime($task['run_after']) > time()) {
+        $processed[] = $task; // Keep pending until time comes
+        continue;
+    }
+    
+    try {
+        switch ($task['type']) {
+            case 'move_spam':
+                $success = moveSpamEmail($task['data']);
+                break;
+            case 'scheduled_command':
+                $success = runScheduledCommand($task['data']);
+                break;
+            default:
+                logMessage("Unknown task type: {$task['type']}");
+                $success = false;
+        }
+        
+        $task['status'] = $success ? 'completed' : 'failed';
+        $task['processed'] = date('Y-m-d H:i:s');
+        
+        logMessage("Task {$task['id']} {$task['status']}");
+        
+    } catch (Exception $e) {
+        $task['status'] = 'failed';
+        $task['error'] = $e->getMessage();
+        logMessage("Task {$task['id']} failed: " . $e->getMessage());
+    }
+    
+    $processed[] = $task;
+}
+
+// Keep only last 100 tasks
+$processed = array_slice($processed, -100);
+file_put_contents($queueFile, json_encode($processed, JSON_PRETTY_PRINT), LOCK_EX);
+
+function moveSpamEmail($data) {
+    $spamDir = dirname($data['target_path']);
+    
+    if (!is_dir($spamDir)) {
+        mkdir($spamDir . '/cur', 0755, true);
+        mkdir($spamDir . '/new', 0755, true);
+        mkdir($spamDir . '/tmp', 0755, true);
+    }
+    
+    return file_put_contents($data['target_path'], $data['email_content']) !== false;
+}
+
+function runScheduledCommand($data) {
+    $command = $data['command'];
+    $args = $data['args'] ?? [];
+    
+    // Build command string
+    $cmdStr = 'php /usr/local/share/cyford/security/index.php --input_type=internal --command=' . escapeshellarg($command);
+    
+    foreach ($args as $key => $value) {
+        $cmdStr .= ' --' . escapeshellarg($key) . '=' . escapeshellarg($value);
+    }
+    
+    exec($cmdStr . ' 2>&1', $output, $returnCode);
+    
+    logMessage("Scheduled command '{$command}' executed with return code: {$returnCode}");
+    
+    return $returnCode === 0;
+}
+PHP;
+        
+        file_put_contents($processorScript, $script);
+        chmod($processorScript, 0755);
+        echo "✅ Created task processor: {$processorScript}\n";
+    }
+    
+    /**
+     * Setup cron job for task processor
+     */
+    private function setupCronJob(): void
+    {
+        $cronEntry = '* * * * * /usr/local/bin/cyford-task-processor >/dev/null 2>&1';
+        
+        exec('crontab -l 2>/dev/null', $currentCron);
+        
+        if (!in_array($cronEntry, $currentCron)) {
+            $currentCron[] = $cronEntry;
+            $cronContent = implode("\n", $currentCron) . "\n";
+            
+            $tempFile = tempnam('/tmp', 'cron');
+            file_put_contents($tempFile, $cronContent);
+            exec("crontab {$tempFile}");
+            unlink($tempFile);
+            
+            echo "✅ Added cron job (runs every minute)\n";
+        } else {
+            echo "ℹ️  Cron job already exists\n";
+        }
+    }
+
+    /**
      * Format bytes into a readable size.
      *
      * @param int $bytes

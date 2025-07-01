@@ -80,6 +80,18 @@ class Internal
                 $this->performSystemInventory();
                 break;
                 
+            case 'setup-task-queue':
+                $this->setupTaskQueue();
+                break;
+                
+            case 'cron-status':
+                $this->checkCronStatus();
+                break;
+                
+            case 'queue-status':
+                $this->checkQueueStatus();
+                break;
+                
             default:
                 $this->showHelp();
         }
@@ -1807,6 +1819,33 @@ SIEVE;
     {
         $systems = new Systems();
         $systems->performSystemInventory();
+    }
+    
+    /**
+     * Setup task queue system
+     */
+    private function setupTaskQueue(): void
+    {
+        $systems = new Systems();
+        $systems->setupTaskQueue($this->config);
+    }
+    
+    /**
+     * Check cron job status
+     */
+    private function checkCronStatus(): void
+    {
+        $systems = new Systems();
+        $systems->checkCronStatus();
+    }
+    
+    /**
+     * Check task queue status
+     */
+    private function checkQueueStatus(): void
+    {
+        $systems = new Systems();
+        $systems->checkQueueStatus();
     }
 
     /**
