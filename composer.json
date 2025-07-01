@@ -2,7 +2,7 @@
     "name": "cyford/security",
     "description": "Making our digital world a safer place",
     "require": {
-        "php": "8.0",
+        "php": "8.3",
         "guzzlehttp/guzzle": "^7.9",
         "symfony/monolog-bundle": "^3.10",
       "ext-curl": "*"

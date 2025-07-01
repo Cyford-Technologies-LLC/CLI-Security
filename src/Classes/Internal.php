@@ -1515,7 +1515,7 @@ DOVECOT;
     /**
      * Create dovecot-lda wrapper script
      */
-    private function createDovecotLDAWrapper(string $ldaPath = null, string $wrapperScript = '/usr/local/bin/cyford-dovecot-lda'): void
+    private function createDovecotLDAWrapper(?string $ldaPath = null, string $wrapperScript = '/usr/local/bin/cyford-dovecot-lda'): void
     {
         if (!$ldaPath) {
             // Find dovecot-lda path
