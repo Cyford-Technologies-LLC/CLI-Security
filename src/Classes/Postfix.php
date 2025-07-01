@@ -261,13 +261,15 @@ class Postfix
             // Log detailed spam information
             $this->logSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
             
-            // Check spam handling method
+            // Check spam handling method FIRST
             $spamHandlingMethod = $config['postfix']['spam_handling_method'] ?? 'requeue';
             if ($spamHandlingMethod === 'maildir') {
+                $logger->info("Using maildir spam handling method");
                 $this->deliverSpamToMaildir($emailData, $recipient, $logger);
                 return;
             }
             
+            $logger->info("Using standard spam handling method: {$spamHandlingMethod}");
             $this->handleSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
             return;
         }
