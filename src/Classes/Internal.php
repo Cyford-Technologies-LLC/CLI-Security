@@ -92,6 +92,10 @@ class Internal
                 $this->checkQueueStatus();
                 break;
                 
+            case 'cron-log':
+                $this->checkCronLog();
+                break;
+                
             default:
                 $this->showHelp();
         }
@@ -1864,6 +1868,15 @@ SIEVE;
     {
         $systems = new Systems();
         $systems->checkQueueStatus();
+    }
+    
+    /**
+     * Check cron job processing log
+     */
+    private function checkCronLog(): void
+    {
+        $systems = new Systems();
+        $systems->checkCronLog();
     }
 
     /**

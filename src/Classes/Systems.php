@@ -472,7 +472,9 @@ class Systems
             if (!empty($tasks)) {
                 echo "\n🔍 Recent tasks:\n";
                 foreach (array_slice($tasks, -5) as $task) {
-                    echo "  ID: {$task['id']} | Type: {$task['type']} | Created: {$task['created']}\n";
+                    $status = $task['status'] ?? 'unknown';
+                    $schedule = isset($task['run_after']) ? " | Run after: {$task['run_after']}" : '';
+                    echo "  ID: {$task['id']} | Type: {$task['type']} | Status: {$status} | Created: {$task['created']}{$schedule}\n";
                 }
             }
         } else {
@@ -484,6 +486,48 @@ class Systems
         if (file_exists($logFile)) {
             $logSize = filesize($logFile);
             echo "📄 Log file: {$logFile} (" . $this->formatSize($logSize) . ")\n";
+        }
+    }
+    
+    /**
+     * Check cron job processing log
+     */
+    public function checkCronLog(): void
+    {
+        echo "📅 Checking cron job processing log...\n";
+        
+        $logFile = '/var/log/cyford-security/task-processor.log';
+        
+        if (file_exists($logFile)) {
+            $logSize = filesize($logFile);
+            echo "📄 Log file: {$logFile} (" . $this->formatSize($logSize) . ")\n";
+            
+            // Show last 20 lines
+            exec("tail -20 {$logFile} 2>/dev/null", $logLines);
+            if (!empty($logLines)) {
+                echo "\n📜 Recent log entries:\n";
+                foreach ($logLines as $line) {
+                    echo "  {$line}\n";
+                }
+            } else {
+                echo "⚠️  No recent log entries found\n";
+            }
+            
+            // Count total processed tasks
+            exec("grep -c 'completed\|failed' {$logFile} 2>/dev/null", $processedCount);
+            if (!empty($processedCount)) {
+                echo "\n📊 Total tasks processed: " . $processedCount[0] . "\n";
+            }
+            
+            // Show last processing time
+            exec("tail -1 {$logFile} 2>/dev/null | grep -o '\[.*\]'", $lastTime);
+            if (!empty($lastTime)) {
+                echo "🕰️  Last activity: " . trim($lastTime[0], '[]') . "\n";
+            }
+            
+        } else {
+            echo "❌ Log file not found: {$logFile}\n";
+            echo "Cron job may not have run yet or logging is not working\n";
         }
     }
     
