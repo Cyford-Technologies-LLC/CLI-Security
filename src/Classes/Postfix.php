@@ -1379,51 +1379,44 @@ EOF;
     }
 
     /**
-     * Deliver spam directly to user's maildir spam folder
+     * Deliver spam to maildir via task queue (chroot-safe)
      */
     private function deliverSpamToMaildir(string $emailData, string $recipient, $logger): void
     {
         global $config;
         
-        $logger->info("=== SPAM MAILDIR DELIVERY START ===");
+        $logger->info("=== SPAM MAILDIR DELIVERY VIA TASK QUEUE ===");
         $logger->info("Recipient: {$recipient}");
         
         $username = strstr($recipient, '@', true);
         $logger->info("Extracted username: {$username}");
         
         $maildirPath = str_replace('{user}', $username, $config['postfix']['spam_handling']['maildir_path']);
-        $logger->info("User maildir path: {$maildirPath}");
-        
         $spamDir = $maildirPath . '/.' . $config['postfix']['spam_handling']['quarantine_folder'];
-        $logger->info("Spam folder path: {$spamDir}");
-
-        if (!is_dir($spamDir)) {
-            $logger->info("Spam folder doesn't exist, creating directory structure...");
-            $success = mkdir($spamDir . '/cur', 0755, true) &&
-                      mkdir($spamDir . '/new', 0755, true) &&
-                      mkdir($spamDir . '/tmp', 0755, true);
-            
-            if ($success) {
-                $logger->info("Successfully created spam folder structure");
-            } else {
-                $logger->error("Failed to create spam folder structure");
-                return;
-            }
-        } else {
-            $logger->info("Spam folder already exists");
-        }
-
         $filename = time() . '.' . getmypid() . '.spam';
-        $fullPath = $spamDir . '/new/' . $filename;
-        $logger->info("Writing spam email to: {$fullPath}");
+        $targetPath = $spamDir . '/new/' . $filename;
+        
+        $logger->info("Target path: {$targetPath}");
         $logger->info("Email size: " . strlen($emailData) . " bytes");
         
-        if (file_put_contents($fullPath, $emailData)) {
-            $logger->info("✅ SUCCESS: Spam email delivered to maildir: {$fullPath}");
-            $logger->info("=== SPAM MAILDIR DELIVERY COMPLETE ===");
+        try {
+            // Add task to queue for root processor to handle
+            $systems = new Systems();
+            $taskId = $systems->addTask('move_spam', [
+                'email_content' => $emailData,
+                'recipient' => $recipient,
+                'username' => $username,
+                'target_path' => $targetPath,
+                'spam_dir' => $spamDir
+            ]);
+            
+            $logger->info("✅ SUCCESS: Spam task added to queue: {$taskId}");
+            $logger->info("Task will be processed by root cron job within 1 minute");
+            $logger->info("=== SPAM MAILDIR DELIVERY QUEUED ===");
             exit(0);
-        } else {
-            $logger->error("❌ FAILED: Could not write spam email to maildir");
+            
+        } catch (Exception $e) {
+            $logger->error("❌ FAILED: Could not add spam task to queue: " . $e->getMessage());
             $logger->error("Falling back to standard requeue method");
         }
     }
