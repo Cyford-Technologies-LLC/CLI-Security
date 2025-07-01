@@ -37,7 +37,7 @@ return [
         'allow_modification' => true, // Set to true to allow automatic configuration changes
         'backup_directory' => '/var/backups/postfix', // Path to store configuration file backups
         'spam_handling' => [
-            'action' => 'headers', // Options: 'reject', 'quarantine', 'allow', 'headers'
+            'action' => 'quarantine', // Options: 'reject', 'quarantine', 'allow', 'headers'
             'bounce_message' => 'Your message has been rejected due to spam content by Cyford Web Armor. Please contact the administrator if you believe this is an error.',
             'quarantine_folder' => 'Spambox', // Folder name to create for spam emails
             'quarantine_method' => 'user_maildir', // Options: 'user_maildir', 'system_quarantine'
