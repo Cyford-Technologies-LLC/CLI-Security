@@ -261,6 +261,13 @@ class Postfix
             // Log detailed spam information
             $this->logSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
             
+            // Check spam handling method
+            $spamHandlingMethod = $config['postfix']['spam_handling_method'] ?? 'requeue';
+            if ($spamHandlingMethod === 'maildir') {
+                $this->deliverSpamToMaildir($emailData, $recipient, $logger);
+                return;
+            }
+            
             $this->handleSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
             return;
         }
@@ -1368,6 +1375,32 @@ EOF;
             $logger->info("Email successfully delivered via dovecot-lda");
         } else {
             throw new RuntimeException("Failed to open process for dovecot-lda execution");
+        }
+    }
+
+    /**
+     * Deliver spam directly to user's maildir spam folder
+     */
+    private function deliverSpamToMaildir(string $emailData, string $recipient, $logger): void
+    {
+        global $config;
+        
+        $username = strstr($recipient, '@', true);
+        $maildirPath = str_replace('{user}', $username, $config['postfix']['spam_handling']['maildir_path']);
+        $spamDir = $maildirPath . '/.' . $config['postfix']['spam_handling']['quarantine_folder'];
+
+        if (!is_dir($spamDir)) {
+            mkdir($spamDir . '/cur', 0755, true);
+            mkdir($spamDir . '/new', 0755, true);
+            mkdir($spamDir . '/tmp', 0755, true);
+        }
+
+        $filename = time() . '.' . getmypid() . '.spam';
+        if (file_put_contents($spamDir . '/new/' . $filename, $emailData)) {
+            $logger->info("Spam email delivered to maildir: {$spamDir}/new/{$filename}");
+            exit(0);
+        } else {
+            $logger->error("Failed to deliver spam to maildir, falling back to requeue");
         }
     }
 

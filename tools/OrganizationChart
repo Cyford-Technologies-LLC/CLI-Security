@@ -1,0 +1,35 @@
+1   system.php  class  will have a  function that creates and json/array  of all system installed
+also  an array  of os specifications,   os type,  cpu's  ,  memory amount ,  memory free ,  hard disk size  and hdd free...
+get public ip  from external  and interfaces .   ut will get everything our system will need on install  only  when internal command is issued
+
+
+2   it imports  all config settings from config.php
+
+3   if the software is installed and the config has it enabled
+it should backup  that software configs,   but creating a directory in backup dir  .   the directory name should be the application name , example postfix
+
+4   if the software is installed and the config has it disabled,    mark that application disabled in json
+
+5   if step 3 is enabled   and backups  are complete,   we need to parse  postfix to see any custom config ,   determine if it is fresh  or customer tailored setup
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

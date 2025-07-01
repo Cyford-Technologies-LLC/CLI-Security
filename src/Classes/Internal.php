@@ -72,6 +72,10 @@ class Internal
                 $this->setupDovecotSieve();
                 break;
                 
+            case 'fix-dovecot-permissions':
+                $this->fixDovecotPermissions();
+                break;
+                
             default:
                 $this->showHelp();
         }
@@ -1412,6 +1416,69 @@ DOVECOT;
     }
     
     /**
+     * Aggressively fix all Dovecot permission issues
+     */
+    private function fixDovecotPermissions(): void
+    {
+        echo "🔧 Aggressively fixing all Dovecot permission issues...\n";
+        
+        // Stop dovecot first
+        exec('systemctl stop dovecot 2>/dev/null');
+        echo "⏹️  Stopped Dovecot\n";
+        
+        // Fix all log files and directories
+        $commands = [
+            'mkdir -p /var/log/dovecot /var/log/dovcot',
+            'touch /var/log/dovecot/error.log /var/log/dovcot/error.log',
+            'touch /var/log/dovecot/info.log /var/log/dovcot/info.log',
+            'chown -R dovecot:mail /var/log/dovecot /var/log/dovcot',
+            'chmod -R 777 /var/log/dovecot /var/log/dovcot',
+            'find /var/log -name "*dovecot*" -o -name "*dovcot*" | xargs chmod 777 2>/dev/null',
+            'find /var/log -name "*dovecot*" -o -name "*dovcot*" | xargs chown dovecot:mail 2>/dev/null'
+        ];
+        
+        foreach ($commands as $cmd) {
+            exec($cmd . ' 2>/dev/null');
+        }
+        echo "✅ Fixed all log file permissions (777)\n";
+        
+        // Start dovecot
+        exec('systemctl start dovecot 2>/dev/null');
+        echo "▶️  Started Dovecot\n";
+        
+        // Wait and fix runtime permissions
+        sleep(3);
+        
+        $runtimeCommands = [
+            'chown -R dovecot:mail /run/dovecot 2>/dev/null',
+            'chmod -R 777 /run/dovecot 2>/dev/null',
+            'find /run/dovecot -type s -exec chmod 777 {} \; 2>/dev/null',
+            'find /run/dovecot -type f -exec chmod 777 {} \; 2>/dev/null'
+        ];
+        
+        foreach ($runtimeCommands as $cmd) {
+            exec($cmd);
+        }
+        echo "✅ Fixed all runtime socket permissions (777)\n";
+        
+        // Test dovecot-lda manually
+        echo "\n🧪 Testing dovecot-lda manually...\n";
+        exec('echo "test" | /usr/libexec/dovecot/dovecot-lda -d allen -f test@example.com 2>&1', $testOutput, $testReturn);
+        
+        if ($testReturn === 0) {
+            echo "✅ dovecot-lda test successful\n";
+        } else {
+            echo "❌ dovecot-lda test failed:\n";
+            foreach ($testOutput as $line) {
+                echo "  {$line}\n";
+            }
+        }
+        
+        echo "\n🎉 Aggressive permission fix completed!\n";
+        echo "All permissions set to 777 for maximum compatibility.\n";
+    }
+    
+    /**
      * Create dovecot-lda wrapper script
      */
     private function createDovecotLDAWrapper(string $ldaPath = null, string $wrapperScript = '/usr/local/bin/cyford-dovecot-lda'): void
@@ -1746,6 +1813,7 @@ SIEVE;
         echo "  setup-user-permissions - Setup user directory permissions for postfix (--username=user or --username=all)\n";
         echo "  setup-sieve-rules      - Setup Dovecot Sieve spam filtering rules (--username=user or --username=all)\n";
         echo "  setup-dovecot-sieve    - Complete Dovecot Sieve setup (install, configure, permissions)\n";
+        echo "  fix-dovecot-permissions - Fix Dovecot permission issues\n";
         echo "  test-database      - Test database connection and functionality\n";
         echo "  view-spam-patterns - View spam patterns (--limit=20)\n";
         echo "  clear-spam-pattern - Remove spam pattern (--pattern_id=123)\n";
@@ -1761,6 +1829,7 @@ SIEVE;
         echo "  php index.php --input_type=internal --command=setup-user-permissions --username=all\n";
         echo "  php index.php --input_type=internal --command=setup-sieve-rules --username=all\n";
         echo "  php index.php --input_type=internal --command=setup-dovecot-sieve\n";
+        echo "  php index.php --input_type=internal --command=fix-dovecot-permissions\n";
         echo "  php index.php --input_type=internal --command=setup-database\n";
         echo "  php index.php --input_type=internal --command=stats\n";
         echo "  php index.php --input_type=internal --command=test-spam-filter --subject='Hello' --body='Test message'\n";
