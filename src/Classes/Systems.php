@@ -467,7 +467,7 @@ class Systems
     {
         echo "📊 Checking task queue status...\n";
         
-        $queueFile = '/usr/local/share/cyford/security/tasks.json';
+        $queueFile = '/var/spool/postfix/cyford-tasks.json';
         
         if (file_exists($queueFile)) {
             $tasks = json_decode(file_get_contents($queueFile), true) ?: [];
@@ -541,8 +541,8 @@ class Systems
      */
     public function addTask(string $type, array $data, string $schedule = 'now'): string
     {
-        // Use project directory for chroot compatibility
-        $queueFile = '/usr/local/share/cyford/security/tasks.json';
+        // Use chroot-accessible directory
+        $queueFile = '/var/spool/postfix/cyford-tasks.json';
         $tasks = [];
         
         if (file_exists($queueFile)) {
@@ -835,7 +835,7 @@ class Systems
 // Cyford Security Task Processor
 // Runs as root to handle chroot limitations
 
-$queueFile = '/usr/local/share/cyford/security/tasks.json';
+$queueFile = '/var/spool/postfix/cyford-tasks.json';
 $logFile = '/var/log/cyford-security/task-processor.log';
 
 function logMessage($message) {

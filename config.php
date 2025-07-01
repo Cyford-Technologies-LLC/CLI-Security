@@ -74,8 +74,8 @@ return [
         'cache_ttl' => 300, // Cache time-to-live in seconds (5 minutes)
     ],
     'task_queue' => [
-        'queue_file' => '/usr/local/share/cyford/security/tasks.json', // Task queue file (chroot accessible)
-        'backup_queue_file' => '/var/spool/cyford-security/tasks.json', // Symlink target
+        'queue_file' => '/var/spool/postfix/cyford-tasks.json', // Task queue file (chroot accessible)
+        'backup_queue_file' => '/var/spool/cyford-security/tasks.json', // Legacy location
     ],
     'log' => [
         'file_path' => '/var/log/cyford-security/application.log',
