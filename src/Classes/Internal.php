@@ -401,9 +401,12 @@ class Internal
             // 5. Setup project directory
             echo "📂 Setting up project directory...\n";
             $projectDir = '/usr/local/share/cyford/security';
-            exec("chown -R report-ip:report-ip {$projectDir}");
-            exec("chmod -R 755 {$projectDir}");
-            echo "✅ Project directory: {$projectDir}\n";
+            exec("chown -R report-ip:postfix {$projectDir}");
+            exec("find {$projectDir} -type d -exec chmod 775 {} \;");
+            exec("find {$projectDir} -type f -exec chmod 664 {} \;");
+            // Ensure tasks.json is group writable
+            exec("chmod 664 {$projectDir}/tasks.json 2>/dev/null");
+            echo "✅ Project directory: {$projectDir} (group writable)\n";
             
             // 6. Setup task queue permissions
             echo "📋 Setting up task queue permissions...\n";
