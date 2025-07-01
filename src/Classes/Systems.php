@@ -398,12 +398,26 @@ class Systems
     {
         echo "🔧 Setting up task queue system...\n";
         
-        // Create task queue directory
+        // Create task queue directory with proper permissions
         $queueDir = '/var/spool/cyford-security';
         if (!is_dir($queueDir)) {
             mkdir($queueDir, 0755, true);
             echo "✅ Created queue directory: {$queueDir}\n";
         }
+        
+        // Set permissions for report-ip user to write tasks
+        exec("chown root:postfix {$queueDir}");
+        exec("chmod 775 {$queueDir}");
+        echo "✅ Set queue directory permissions for report-ip user\n";
+        
+        // Create tasks.json file with proper permissions
+        $tasksFile = $queueDir . '/tasks.json';
+        if (!file_exists($tasksFile)) {
+            file_put_contents($tasksFile, '[]');
+        }
+        exec("chown root:postfix {$tasksFile}");
+        exec("chmod 664 {$tasksFile}");
+        echo "✅ Set tasks file permissions\n";
         
         // Create task processor script
         $this->createTaskProcessor($config);

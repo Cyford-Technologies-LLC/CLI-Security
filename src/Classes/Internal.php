@@ -385,6 +385,23 @@ class Internal
             exec("chmod -R 755 {$projectDir}");
             echo "✅ Project directory: {$projectDir}\n";
             
+            // 6. Setup task queue permissions
+            echo "📋 Setting up task queue permissions...\n";
+            $queueDir = '/var/spool/cyford-security';
+            if (!is_dir($queueDir)) {
+                mkdir($queueDir, 0755, true);
+            }
+            exec("chown root:postfix {$queueDir}");
+            exec("chmod 775 {$queueDir}");
+            
+            $tasksFile = $queueDir . '/tasks.json';
+            if (!file_exists($tasksFile)) {
+                file_put_contents($tasksFile, '[]');
+            }
+            exec("chown root:postfix {$tasksFile}");
+            exec("chmod 664 {$tasksFile}");
+            echo "✅ Task queue permissions: {$queueDir}\n";
+            
             echo "\n🎉 Permission setup completed successfully!\n";
             echo "\n📋 Summary:\n";
             echo "  ✅ Sudoers rule created for report-ip user\n";
@@ -392,6 +409,7 @@ class Internal
             echo "  ✅ Database permissions set\n";
             echo "  ✅ List files initialized\n";
             echo "  ✅ Project directory permissions set\n";
+            echo "  ✅ Task queue permissions configured\n";
             echo "\n🚀 System is ready for operation!\n";
             
         } catch (Exception $e) {
