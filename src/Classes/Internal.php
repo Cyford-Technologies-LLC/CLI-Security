@@ -13,46 +13,71 @@ class Internal
     }
 
     /**
-     * Process internal commands - Route to appropriate classes
+     * Process internal commands
      */
     public function processCommand(array $args): void
     {
         $command = $args['command'] ?? '';
         
         switch ($command) {
-            // Database commands
             case 'setup-database':
+                $this->setupDatabase();
+                break;
+                
             case 'test-database':
+                $this->testDatabase();
+                break;
+                
             case 'view-spam-patterns':
+                $this->viewSpamPatterns($args['limit'] ?? 20);
+                break;
+                
             case 'clear-spam-pattern':
+                $this->clearSpamPattern($args['pattern_id'] ?? 0);
+                break;
+                
             case 'stats':
-                $database = new Database($this->config);
-                $database->handleCommand($command, $args);
+                $this->showStats();
                 break;
                 
-            // SpamFilter commands
             case 'test-spam-filter':
-                $spamFilter = new SpamFilter($this->config);
-                $spamFilter->testSpamFilter($args['subject'] ?? '', $args['body'] ?? '');
+                $this->testSpamFilter($args['subject'] ?? '', $args['body'] ?? '');
                 break;
                 
-            // Systems commands
-            case 'system-inventory':
-            case 'setup-permissions':
-            case 'create-docker':
-            case 'create-user':
-            case 'setup-user-permissions':
             case 'reload-lists':
-                $systems = new Systems();
-                $systems->handleCommand($command, $args, $this->config);
+                $this->reloadLists();
                 break;
                 
-            // Sieve commands
+            case 'setup-permissions':
+                $this->setupPermissions();
+                break;
+                
+            case 'create-docker':
+                $this->createDockerEnvironment();
+                break;
+                
+            case 'create-user':
+                $this->createUser($args['username'] ?? '', $args['password'] ?? '');
+                break;
+                
+            case 'setup-user-permissions':
+                $this->setupUserPermissions($args['username'] ?? '');
+                break;
+                
             case 'setup-sieve-rules':
+                $this->setupSieveRules($args['username'] ?? '');
+                break;
+                
             case 'setup-dovecot-sieve':
+                $this->setupDovecotSieve();
+                break;
+                
             case 'fix-dovecot-permissions':
-                $sieve = new Sieve($this->config);
-                $sieve->handleCommand($command, $args);
+                $this->fixDovecotPermissions();
+                break;
+                
+            case 'system-inventory':
+                $this->performSystemInventory();
                 break;
                 
             default:
