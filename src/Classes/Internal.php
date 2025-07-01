@@ -13,71 +13,46 @@ class Internal
     }
 
     /**
-     * Process internal commands
+     * Process internal commands - Route to appropriate classes
      */
     public function processCommand(array $args): void
     {
         $command = $args['command'] ?? '';
         
         switch ($command) {
+            // Database commands
             case 'setup-database':
-                $this->setupDatabase();
-                break;
-                
             case 'test-database':
-                $this->testDatabase();
-                break;
-                
             case 'view-spam-patterns':
-                $this->viewSpamPatterns($args['limit'] ?? 20);
-                break;
-                
             case 'clear-spam-pattern':
-                $this->clearSpamPattern($args['pattern_id'] ?? 0);
-                break;
-                
             case 'stats':
-                $this->showStats();
+                $database = new Database($this->config);
+                $database->handleCommand($command, $args);
                 break;
                 
+            // SpamFilter commands
             case 'test-spam-filter':
-                $this->testSpamFilter($args['subject'] ?? '', $args['body'] ?? '');
+                $spamFilter = new SpamFilter($this->config);
+                $spamFilter->testSpamFilter($args['subject'] ?? '', $args['body'] ?? '');
                 break;
                 
-            case 'reload-lists':
-                $this->reloadLists();
-                break;
-                
-            case 'setup-permissions':
-                $this->setupPermissions();
-                break;
-                
-            case 'create-docker':
-                $this->createDockerEnvironment();
-                break;
-                
-            case 'create-user':
-                $this->createUser($args['username'] ?? '', $args['password'] ?? '');
-                break;
-                
-            case 'setup-user-permissions':
-                $this->setupUserPermissions($args['username'] ?? '');
-                break;
-                
-            case 'setup-sieve-rules':
-                $this->setupSieveRules($args['username'] ?? '');
-                break;
-                
-            case 'setup-dovecot-sieve':
-                $this->setupDovecotSieve();
-                break;
-                
-            case 'fix-dovecot-permissions':
-                $this->fixDovecotPermissions();
-                break;
-                
+            // Systems commands
             case 'system-inventory':
-                $this->performSystemInventory();
+            case 'setup-permissions':
+            case 'create-docker':
+            case 'create-user':
+            case 'setup-user-permissions':
+            case 'reload-lists':
+                $systems = new Systems();
+                $systems->handleCommand($command, $args, $this->config);
+                break;
+                
+            // Sieve commands
+            case 'setup-sieve-rules':
+            case 'setup-dovecot-sieve':
+            case 'fix-dovecot-permissions':
+                $sieve = new Sieve($this->config);
+                $sieve->handleCommand($command, $args);
                 break;
                 
             default:
@@ -1805,37 +1780,8 @@ SIEVE;
      */
     private function performSystemInventory(): void
     {
-        echo "🔍 Performing system inventory...\n";
-        
-        try {
-            $systems = new Systems();
-            
-            // Get system specifications
-            $systemInfo = [
-                'timestamp' => date('Y-m-d H:i:s'),
-                'system' => $systems->getSystemSpecs(),
-                'network' => $systems->getNetworkInfo(),
-                'software' => $systems->getInstalledSoftware()
-            ];
-            
-            // Save to JSON file
-            $inventoryFile = './system_inventory.json';
-            file_put_contents($inventoryFile, json_encode($systemInfo, JSON_PRETTY_PRINT));
-            
-            echo "✅ System inventory completed\n";
-            echo "📄 Saved to: {$inventoryFile}\n";
-            
-            // Display summary
-            echo "\n📊 System Summary:\n";
-            echo "  OS: {$systemInfo['system']['os']}\n";
-            echo "  CPUs: {$systemInfo['system']['cpu_count']}\n";
-            echo "  Memory: {$systemInfo['system']['memory_total']}\n";
-            echo "  Public IP: {$systemInfo['network']['public_ip']}\n";
-            echo "  Software Found: " . count($systemInfo['software']) . " packages\n";
-            
-        } catch (Exception $e) {
-            echo "❌ System inventory failed: " . $e->getMessage() . "\n";
-        }
+        $systems = new Systems();
+        $systems->performSystemInventory();
     }
 
     /**

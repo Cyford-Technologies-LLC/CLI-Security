@@ -356,6 +356,42 @@ class Systems
     }
 
     /**
+     * Perform complete system inventory
+     */
+    public function performSystemInventory(): void
+    {
+        echo "🔍 Performing system inventory...\n";
+        
+        try {
+            // Get system specifications
+            $systemInfo = [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'system' => $this->getSystemSpecs(),
+                'network' => $this->getNetworkInfo(),
+                'software' => $this->getInstalledSoftware()
+            ];
+            
+            // Save to JSON file
+            $inventoryFile = './system_inventory.json';
+            file_put_contents($inventoryFile, json_encode($systemInfo, JSON_PRETTY_PRINT));
+            
+            echo "✅ System inventory completed\n";
+            echo "📄 Saved to: {$inventoryFile}\n";
+            
+            // Display summary
+            echo "\n📊 System Summary:\n";
+            echo "  OS: {$systemInfo['system']['os']}\n";
+            echo "  CPUs: {$systemInfo['system']['cpu_count']}\n";
+            echo "  Memory: {$systemInfo['system']['memory_total']}\n";
+            echo "  Public IP: {$systemInfo['network']['public_ip']}\n";
+            echo "  Software Found: " . count($systemInfo['software']) . " packages\n";
+            
+        } catch (Exception $e) {
+            echo "❌ System inventory failed: " . $e->getMessage() . "\n";
+        }
+    }
+
+    /**
      * Format bytes into a readable size.
      *
      * @param int $bytes
