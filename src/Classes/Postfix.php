@@ -883,7 +883,8 @@ EOF;
             }
             
             $spamFile = $maildirPath . '/new/';
-        } else {
+        }
+        else {
             // Use system quarantine (chroot compatible)
             $systemQuarantinePath = $config['postfix']['spam_handling']['system_quarantine_path'] ?? '/var/spool/postfix/quarantine';
             $userSpamPath = $systemQuarantinePath . '/' . $realUser;

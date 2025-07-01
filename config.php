@@ -30,7 +30,7 @@ return [
     'postfix' => [
         'enable_postfix_integration' => true, // Enable postfix integration
         'requeue_method' => 'smtp', // Options: smtp, sendmail, postdrop, postpickup, dovecot-lda (SMTP recommended for chroot compatibility)
-        'spam_handling_method' => 'requeue', // Options: maildir, requeue (requeue works with chroot)
+        'spam_handling_method' => 'maildir', // Options: maildir, requeue (maildir uses task queue for chroot)
         'main_config' => '/etc/postfix/main.cf', // Path to Postfix main configuration file
         'master_config' => '/etc/postfix/master.cf', // Path to Postfix master configuration file
         'postfix_command' => '/usr/sbin/postfix', // Path to Postfix executable
