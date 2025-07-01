@@ -261,6 +261,9 @@ class Postfix
             // Log detailed spam information
             $this->logSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
             
+            // Add footer to spam email if configured
+            $emailData = $this->addFooterIfConfigured($emailData, true);
+            
             // Check spam handling method FIRST
             $spamHandlingMethod = $config['postfix']['spam_handling_method'] ?? 'requeue';
             if ($spamHandlingMethod === 'maildir') {
@@ -1015,7 +1018,7 @@ EOF;
         $footerText = $config['postfix']['spam_handling']['footer_text'] ?? '\n\n--- This email has been scanned by Cyford Security Filter ---';
         
         if ($isSpam) {
-            $footerText = '\n\n--- WARNING: This email was flagged as spam but allowed through ---';
+            $footerText = '\n\n--- This email was flagged as spam and quarantined by Cyford Web Armor ---';
         }
         
         // Find the end of headers and add footer to body

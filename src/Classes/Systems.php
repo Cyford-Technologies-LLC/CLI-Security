@@ -899,14 +899,26 @@ file_put_contents($queueFile, json_encode($processed, JSON_PRETTY_PRINT), LOCK_E
 
 function moveSpamEmail($data) {
     $spamDir = dirname($data['target_path']);
+    $username = $data['username'] ?? 'postfix';
     
     if (!is_dir($spamDir)) {
         mkdir($spamDir . '/cur', 0755, true);
         mkdir($spamDir . '/new', 0755, true);
         mkdir($spamDir . '/tmp', 0755, true);
+        
+        // Set ownership to user
+        exec("chown -R {$username}:{$username} " . escapeshellarg(dirname($spamDir)));
     }
     
-    return file_put_contents($data['target_path'], $data['email_content']) !== false;
+    $success = file_put_contents($data['target_path'], $data['email_content']) !== false;
+    
+    if ($success) {
+        // Set proper ownership on the spam file
+        exec("chown {$username}:{$username} " . escapeshellarg($data['target_path']));
+        exec("chmod 644 " . escapeshellarg($data['target_path']));
+    }
+    
+    return $success;
 }
 
 function runScheduledCommand($data) {
