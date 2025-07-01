@@ -1385,22 +1385,46 @@ EOF;
     {
         global $config;
         
+        $logger->info("=== SPAM MAILDIR DELIVERY START ===");
+        $logger->info("Recipient: {$recipient}");
+        
         $username = strstr($recipient, '@', true);
+        $logger->info("Extracted username: {$username}");
+        
         $maildirPath = str_replace('{user}', $username, $config['postfix']['spam_handling']['maildir_path']);
+        $logger->info("User maildir path: {$maildirPath}");
+        
         $spamDir = $maildirPath . '/.' . $config['postfix']['spam_handling']['quarantine_folder'];
+        $logger->info("Spam folder path: {$spamDir}");
 
         if (!is_dir($spamDir)) {
-            mkdir($spamDir . '/cur', 0755, true);
-            mkdir($spamDir . '/new', 0755, true);
-            mkdir($spamDir . '/tmp', 0755, true);
+            $logger->info("Spam folder doesn't exist, creating directory structure...");
+            $success = mkdir($spamDir . '/cur', 0755, true) &&
+                      mkdir($spamDir . '/new', 0755, true) &&
+                      mkdir($spamDir . '/tmp', 0755, true);
+            
+            if ($success) {
+                $logger->info("Successfully created spam folder structure");
+            } else {
+                $logger->error("Failed to create spam folder structure");
+                return;
+            }
+        } else {
+            $logger->info("Spam folder already exists");
         }
 
         $filename = time() . '.' . getmypid() . '.spam';
-        if (file_put_contents($spamDir . '/new/' . $filename, $emailData)) {
-            $logger->info("Spam email delivered to maildir: {$spamDir}/new/{$filename}");
+        $fullPath = $spamDir . '/new/' . $filename;
+        $logger->info("Writing spam email to: {$fullPath}");
+        $logger->info("Email size: " . strlen($emailData) . " bytes");
+        
+        if (file_put_contents($fullPath, $emailData)) {
+            $logger->info("✅ SUCCESS: Spam email delivered to maildir: {$fullPath}");
+            $logger->info("=== SPAM MAILDIR DELIVERY COMPLETE ===");
             exit(0);
         } else {
-            $logger->error("Failed to deliver spam to maildir, falling back to requeue");
+            $logger->error("❌ FAILED: Could not write spam email to maildir");
+            $logger->error("Falling back to standard requeue method");
         }
     }
 

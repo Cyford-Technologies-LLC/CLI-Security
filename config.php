@@ -56,18 +56,18 @@ return [
             'retry_delay' => 1, // Seconds to wait between retries
             'fail_safe_mode' => true, // If true, always pass emails when in doubt
         ],
-        'whitelist' => [
-            'ips_file' => '/usr/local/share/cyford/security/lists/whitelist_ips.txt',
-            'domains_file' => '/usr/local/share/cyford/security/lists/whitelist_domains.txt',
-            'emails_file' => '/usr/local/share/cyford/security/lists/whitelist_emails.txt',
-        ],
-        'blacklist' => [
-            'ips_file' => '/usr/local/share/cyford/security/lists/blacklist_ips.txt',
-            'domains_file' => '/usr/local/share/cyford/security/lists/blacklist_domains.txt',
-            'emails_file' => '/usr/local/share/cyford/security/lists/blacklist_emails.txt',
-        ],
     ],
-
+    'imap' => [
+        'enabled' => true,
+        'server' => 'dovecot',
+        'host' => 'localhost',
+        'port' => 143,
+        'ssl_port' => 993,
+        'auth_method' => 'plain',
+        'maildir_path' => '/home/{user}/Maildir-cyford',
+        'allow_modification' => true,
+        'auto_configure' => true
+    ],
     'database' => [
         'type' => 'sqlite', // Portable database, no installation required
         'path' => '/var/spool/postfix/cyford-security.db', // SQLite database file (persistent and chroot accessible)
@@ -86,6 +86,7 @@ return [
         'domains_file' => '/usr/local/share/cyford/security/lists/blacklist_domains.txt',
         'emails_file' => '/usr/local/share/cyford/security/lists/blacklist_emails.txt',
     ],
+
     'errors' => [
         'report_errors' => 1,
         'error_log_location' => '/var/log/cyford-security/errors/error.log',

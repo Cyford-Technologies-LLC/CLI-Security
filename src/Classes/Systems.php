@@ -285,6 +285,77 @@ class Systems
     }
 
     /**
+     * Get complete system specifications
+     */
+    public function getSystemSpecs(): array
+    {
+        $osInfo = $this->getOSInfo();
+        $memInfo = $this->getMemoryInfo();
+        $diskInfo = $this->getDiskUsage();
+        
+        return [
+            'os' => $osInfo['os'] . ' ' . $osInfo['release'],
+            'hostname' => $osInfo['hostname'],
+            'architecture' => $osInfo['architecture'],
+            'cpu_count' => $this->getCPUCount(),
+            'memory_total' => $memInfo['total_memory'] ?? 'Unknown',
+            'memory_free' => $memInfo['free_memory'] ?? 'Unknown',
+            'disk_total' => $diskInfo['total_space'],
+            'disk_free' => $diskInfo['free_space']
+        ];
+    }
+    
+    /**
+     * Get network information including all interface IPs
+     */
+    public function getNetworkInfo(): array
+    {
+        return [
+            'public_ip' => $this->getPublicIP(),
+            'interfaces' => $this->getAllInterfaceIPs()
+        ];
+    }
+    
+    /**
+     * Get CPU count
+     */
+    private function getCPUCount(): int
+    {
+        if (stristr(PHP_OS, 'linux')) {
+            $output = shell_exec('nproc');
+            return (int)trim($output);
+        }
+        return 1;
+    }
+    
+    /**
+     * Get all network interface IPs
+     */
+    private function getAllInterfaceIPs(): array
+    {
+        $interfaces = [];
+        
+        if (stristr(PHP_OS, 'linux')) {
+            exec('ip addr show', $output);
+            $currentInterface = null;
+            
+            foreach ($output as $line) {
+                // Match interface name
+                if (preg_match('/^\d+:\s+([^:]+):/', $line, $matches)) {
+                    $currentInterface = trim($matches[1]);
+                }
+                
+                // Match IP address
+                if ($currentInterface && preg_match('/inet\s+([0-9.]+)/', $line, $matches)) {
+                    $interfaces[$currentInterface] = $matches[1];
+                }
+            }
+        }
+        
+        return $interfaces;
+    }
+
+    /**
      * Format bytes into a readable size.
      *
      * @param int $bytes

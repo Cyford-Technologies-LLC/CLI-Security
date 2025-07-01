@@ -76,6 +76,10 @@ class Internal
                 $this->fixDovecotPermissions();
                 break;
                 
+            case 'system-inventory':
+                $this->performSystemInventory();
+                break;
+                
             default:
                 $this->showHelp();
         }
@@ -1797,6 +1801,44 @@ SIEVE;
     }
 
     /**
+     * Perform complete system inventory
+     */
+    private function performSystemInventory(): void
+    {
+        echo "🔍 Performing system inventory...\n";
+        
+        try {
+            $systems = new Systems();
+            
+            // Get system specifications
+            $systemInfo = [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'system' => $systems->getSystemSpecs(),
+                'network' => $systems->getNetworkInfo(),
+                'software' => $systems->getInstalledSoftware()
+            ];
+            
+            // Save to JSON file
+            $inventoryFile = './system_inventory.json';
+            file_put_contents($inventoryFile, json_encode($systemInfo, JSON_PRETTY_PRINT));
+            
+            echo "✅ System inventory completed\n";
+            echo "📄 Saved to: {$inventoryFile}\n";
+            
+            // Display summary
+            echo "\n📊 System Summary:\n";
+            echo "  OS: {$systemInfo['system']['os']}\n";
+            echo "  CPUs: {$systemInfo['system']['cpu_count']}\n";
+            echo "  Memory: {$systemInfo['system']['memory_total']}\n";
+            echo "  Public IP: {$systemInfo['network']['public_ip']}\n";
+            echo "  Software Found: " . count($systemInfo['software']) . " packages\n";
+            
+        } catch (Exception $e) {
+            echo "❌ System inventory failed: " . $e->getMessage() . "\n";
+        }
+    }
+
+    /**
      * Show help information
      */
     private function showHelp(): void
@@ -1814,6 +1856,7 @@ SIEVE;
         echo "  setup-sieve-rules      - Setup Dovecot Sieve spam filtering rules (--username=user or --username=all)\n";
         echo "  setup-dovecot-sieve    - Complete Dovecot Sieve setup (install, configure, permissions)\n";
         echo "  fix-dovecot-permissions - Fix Dovecot permission issues\n";
+        echo "  system-inventory       - Perform complete system inventory\n";
         echo "  test-database      - Test database connection and functionality\n";
         echo "  view-spam-patterns - View spam patterns (--limit=20)\n";
         echo "  clear-spam-pattern - Remove spam pattern (--pattern_id=123)\n";
