@@ -18,8 +18,8 @@ class ApiClient
         $this->loginEndpoint = $config['api']['login_endpoint'];
         $this->reportEndpoint = $config['api']['report_endpoint'];
         $this->analyzeSpamEndpoint = $config['api']['analyze_spam_endpoint'] ?? 'https://api.cyfordtechnologies.com/api/security/v1/analyze-spam';
-        $this->email = $config['credentials']['email'];
-        $this->password = $config['credentials']['password'];
+        $this->email = $config['api']['credentials']['email'];
+        $this->password = $config['api']['credentials']['password'];
 
         if ($config['errors']['report_errors'] === 1) {
             ini_set('display_errors', 1);
