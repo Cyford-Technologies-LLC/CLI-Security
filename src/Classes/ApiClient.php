@@ -15,11 +15,27 @@ class ApiClient
 
     public function __construct(array $config)
     {
+        // Validate required config
+        if (empty($config['api']['login_endpoint'])) {
+            throw new RuntimeException("Missing required config: api.login_endpoint");
+        }
+        if (empty($config['api']['report_endpoint'])) {
+            throw new RuntimeException("Missing required config: api.report_endpoint");
+        }
+        if (empty($config['api']['credentials']['email'])) {
+            throw new RuntimeException("Missing required config: api.credentials.email");
+        }
+        if (empty($config['api']['credentials']['password'])) {
+            throw new RuntimeException("Missing required config: api.credentials.password");
+        }
+        
         $this->loginEndpoint = $config['api']['login_endpoint'];
         $this->reportEndpoint = $config['api']['report_endpoint'];
         $this->analyzeSpamEndpoint = $config['api']['analyze_spam_endpoint'] ?? 'https://api.cyfordtechnologies.com/api/security/v1/analyze-spam';
         $this->email = $config['api']['credentials']['email'];
         $this->password = $config['api']['credentials']['password'];
+        
+        echo "DEBUG: ApiClient initialized with email: {$this->email}\n";
 
         if ($config['errors']['report_errors'] === 1) {
             ini_set('display_errors', 1);
@@ -231,15 +247,38 @@ class ApiClient
 
         if (curl_errno($ch)) {
             $errorMessage = curl_error($ch);
+            $errorCode = curl_errno($ch);
+            echo "ERROR: cURL Error #{$errorCode}: {$errorMessage}\n";
             curl_close($ch);
             throw new RuntimeException("Error during API request: $errorMessage");
         }
 
         curl_close($ch);
+        
+        // Validate response
+        if ($httpCode === 0) {
+            echo "ERROR: No HTTP response received (connection failed)\n";
+            throw new RuntimeException("No HTTP response received");
+        }
+        
+        if (empty($response)) {
+            echo "ERROR: Empty response from API\n";
+            throw new RuntimeException("Empty response from API");
+        }
+        
+        echo "DEBUG: Raw response: " . substr($response, 0, 200) . "...\n";
+        
+        try {
+            $decodedResponse = json_decode($response, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $e) {
+            echo "ERROR: Invalid JSON response: " . $e->getMessage() . "\n";
+            echo "DEBUG: Response content: $response\n";
+            throw new RuntimeException("Invalid JSON response: " . $e->getMessage());
+        }
 
         return [
             'status_code' => $httpCode,
-            'response' => json_decode($response, true, 512, JSON_THROW_ON_ERROR),
+            'response' => $decodedResponse,
         ];
     }
 }
