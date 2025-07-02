@@ -12,8 +12,9 @@ class ApiClient
     private string $email;
     private string $password;
     private ?string $token = null;
+    private $logger;
 
-    public function __construct(array $config)
+    public function __construct(array $config, $logger = null)
     {
         // Validate required config
         if (empty($config['api']['login_endpoint'])) {
@@ -34,8 +35,7 @@ class ApiClient
         $this->analyzeSpamEndpoint = $config['api']['analyze_spam_endpoint'] ?? 'https://api.cyfordtechnologies.com/api/security/v1/analyze-spam';
         $this->email = $config['api']['credentials']['email'];
         $this->password = $config['api']['credentials']['password'];
-        
-        echo "DEBUG: ApiClient initialized with email: {$this->email}\n";
+        $this->logger = $logger;
 
         if ($config['errors']['report_errors'] === 1) {
             ini_set('display_errors', 1);
