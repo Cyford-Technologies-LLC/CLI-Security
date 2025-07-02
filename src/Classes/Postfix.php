@@ -258,7 +258,7 @@ class Postfix
                     $apiResult = $apiClient->analyzeSpam(
                         $headers['From'] ?? '',
                         $body,
-                        $emailData,
+                        $headers,
                         [
                             'threshold' => $threshold,
                             'hostname' => gethostname()
