@@ -1,6 +1,7 @@
 <?php
 namespace Cyford\Security\Classes;
 
+use Exception;
 use RuntimeException;
 
 class Postfix
