@@ -118,15 +118,17 @@ class ApiClient
      */
     public function analyzeSpam(string $fromEmail, string $body, $headers, array $options = []): array
     {
-        echo "DEBUG: analyzeSpam called with fromEmail: $fromEmail\n";
-        echo "DEBUG: Body length: " . strlen($body) . "\n";
-        echo "DEBUG: Headers type: " . gettype($headers) . "\n";
+        if ($this->logger) {
+            $this->logger->info("DEBUG: analyzeSpam called with fromEmail: $fromEmail");
+            $this->logger->info("DEBUG: Body length: " . strlen($body));
+            $this->logger->info("DEBUG: Headers type: " . gettype($headers));
+        }
         
         if (!$this->token) {
             throw new RuntimeException("No token found. Please login first.");
         }
         
-        echo "DEBUG: Token exists, building params...\n";
+        if ($this->logger) $this->logger->info("DEBUG: Token exists, building params...");
 
         $params = [
             'IP' => $options['ip'] ?? '127.0.0.1',
@@ -139,8 +141,10 @@ class ApiClient
         if (isset($options['hostname'])) $params['hostname'] = $options['hostname'];
         if (isset($options['to_email'])) $params['to_email'] = $options['to_email'];
         
-        echo "DEBUG: Params built, about to call sendRequest...\n";
-        echo "DEBUG: URL will be: " . $this->analyzeSpamEndpoint . '?' . http_build_query($params) . "\n";
+        if ($this->logger) {
+            $this->logger->info("DEBUG: Params built, about to call sendRequest...");
+            $this->logger->info("DEBUG: URL will be: " . $this->analyzeSpamEndpoint . '?' . http_build_query($params));
+        }
 
         return $this->sendRequest(
             $this->analyzeSpamEndpoint . '?' . http_build_query($params),
@@ -221,9 +225,11 @@ class ApiClient
     {
         $ch = curl_init();
 
-        echo "DEBUG: Starting API request to: $url\n";
-        echo "DEBUG: Method: $method\n";
-        echo "DEBUG: Headers: " . json_encode($headers) . "\n";
+        if ($this->logger) {
+            $this->logger->info("DEBUG: Starting API request to: $url");
+            $this->logger->info("DEBUG: Method: $method");
+            $this->logger->info("DEBUG: Headers: " . json_encode($headers));
+        }
         
         $defaultOptions = [
             CURLOPT_RETURNTRANSFER => true,
@@ -243,16 +249,18 @@ class ApiClient
         $finalOptions = $defaultOptions + $options;
         $finalOptions[CURLOPT_URL] = $url;
 
-        echo "DEBUG: Setting cURL options...\n";
+        if ($this->logger) $this->logger->info("DEBUG: Setting cURL options...");
         curl_setopt_array($ch, $finalOptions);
         
-        echo "DEBUG: Executing cURL request...\n";
+        if ($this->logger) $this->logger->info("DEBUG: Executing cURL request...");
         $response = curl_exec($ch);
-        echo "DEBUG: cURL execution completed\n";
+        if ($this->logger) $this->logger->info("DEBUG: cURL execution completed");
         
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        echo "DEBUG: HTTP Code: $httpCode\n";
-        echo "DEBUG: Response length: " . strlen($response ?: '') . "\n";
+        if ($this->logger) {
+            $this->logger->info("DEBUG: HTTP Code: $httpCode");
+            $this->logger->info("DEBUG: Response length: " . strlen($response ?: ''));
+        }
 
         if (curl_errno($ch)) {
             $errorMessage = curl_error($ch);

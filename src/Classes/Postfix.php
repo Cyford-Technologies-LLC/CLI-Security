@@ -243,7 +243,7 @@ class Postfix
                 $logger->info("DEBUG: About to create ApiClient instance");
                 try {
                     $logger->info("DEBUG: Creating ApiClient with config");
-                    $apiClient = new \Cyford\Security\Classes\ApiClient($config);
+                    $apiClient = new \Cyford\Security\Classes\ApiClient($config, $logger);
                     $logger->info("DEBUG: ApiClient created successfully");
                     $logger->info("DEBUG: About to call login()");
                     $apiClient->login();
