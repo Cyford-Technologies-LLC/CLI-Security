@@ -239,9 +239,14 @@ class Postfix
             // Check against API server if enabled
             if ($config['api']['check_spam_against_server'] ?? true) {
                 $logger->info("Starting API spam check...");
+                $logger->info("DEBUG: About to create ApiClient instance");
                 try {
+                    $logger->info("DEBUG: Creating ApiClient with config");
                     $apiClient = new \Cyford\Security\Classes\ApiClient($config);
+                    $logger->info("DEBUG: ApiClient created successfully");
+                    $logger->info("DEBUG: About to call login()");
                     $apiClient->login();
+                    $logger->info("DEBUG: Login completed successfully");
                     
                     $threshold = $config['api']['spam_threshold'] ?? $config['postfix']['spam_handling']['threshold'] ?? 70;
                     $logger->info("API spam check - threshold: {$threshold}, from: " . ($headers['From'] ?? 'unknown'));
