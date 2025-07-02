@@ -142,12 +142,22 @@ class ApiClient
         if (isset($options['email'])) $params['email'] = $options['email'];
         if (isset($options['content'])) $params['content'] = $options['content'];
 
-        return $this->sendRequest(
+        echo "Reporting spam to API - Email: " . ($options['email'] ?? 'none') . "\n";
+        
+        $response = $this->sendRequest(
             'https://api.cyfordtechnologies.com/api/security/v1/report-spam?' . http_build_query($params),
             'POST',
             [],
             ['Authorization: Bearer ' . $this->token]
         );
+        
+        if ($response['status_code'] === 200) {
+            echo "Successfully reported spam to server\n";
+        } else {
+            echo "Failed to report spam. Status: " . $response['status_code'] . "\n";
+        }
+        
+        return $response;
     }
 
     /**
