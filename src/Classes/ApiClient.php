@@ -257,6 +257,71 @@ class ApiClient
         if ($this->logger) $this->logger->info("DEBUG: cURL execution completed");
         
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $totalTime = curl_getinfo($ch, CURLINFO_TOTAL_TIME);
+        $connectTime = curl_getinfo($ch, CURLINFO_CONNECT_TIME);
+        
+        if ($this->logger) {
+            $this->logger->info("DEBUG: HTTP Code: $httpCode");
+            $this->logger->info("DEBUG: Total time: {$totalTime}s");
+            $this->logger->info("DEBUG: Connect time: {$connectTime}s");
+            $this->logger->info("DEBUG: Response length: " . strlen($response ?: ''));
+        }
+        
+        // Check for cURL errors
+        if (curl_errno($ch)) {
+            $errorMessage = curl_error($ch);
+            $errorCode = curl_errno($ch);
+            if ($this->logger) {
+                $this->logger->error("ERROR: cURL Error #{$errorCode}: {$errorMessage}");
+                if ($errorCode == CURLE_OPERATION_TIMEDOUT) {
+                    $this->logger->error("ERROR: cURL request timed out after 10 seconds");
+                }
+            }
+            curl_close($ch);
+            throw new RuntimeException("Error during API request: $errorMessage");
+        }
+        
+        curl_close($ch);
+        
+        // Check for timeout
+        if ($totalTime >= 10) {
+            if ($this->logger) $this->logger->warning("WARNING: Request took {$totalTime}s (near timeout limit)");
+        }
+        
+        // Validate response
+        if ($httpCode === 0) {
+            if ($this->logger) $this->logger->error("ERROR: No HTTP response received (connection failed)");
+            throw new RuntimeException("No HTTP response received");
+        }
+        
+        if (empty($response)) {
+            if ($this->logger) $this->logger->error("ERROR: Empty response from API (HTTP $httpCode)");
+            throw new RuntimeException("Empty response from API");
+        }
+        
+        if ($this->logger) {
+            $this->logger->info("DEBUG: Raw response preview: " . substr($response, 0, 200) . "...");
+        }
+        
+        // Parse JSON response
+        try {
+            if ($this->logger) $this->logger->info("DEBUG: Attempting to decode JSON response...");
+            $decodedResponse = json_decode($response, true, 512, JSON_THROW_ON_ERROR);
+            if ($this->logger) $this->logger->info("DEBUG: JSON decoded successfully");
+        } catch (\JsonException $e) {
+            if ($this->logger) {
+                $this->logger->error("ERROR: Invalid JSON response: " . $e->getMessage());
+                $this->logger->error("DEBUG: Full response content: $response");
+            }
+            throw new RuntimeException("Invalid JSON response: " . $e->getMessage());
+        }
+        
+        if ($this->logger) $this->logger->info("DEBUG: Returning response array");
+        
+        return [
+            'status_code' => $httpCode,
+            'response' => $decodedResponse,
+        ];httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         if ($this->logger) {
             $this->logger->info("DEBUG: HTTP Code: $httpCode");
             $this->logger->info("DEBUG: Response length: " . strlen($response ?: ''));
