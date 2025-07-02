@@ -51,7 +51,7 @@ return [
             'footer_text' => '--- This email has been scanned by Cyford Web Armor ---',
             'add_spam_headers' => true, // Add X-Spam headers to quarantined spam emails
             'spam_log_file' => '/var/log/cyford-security/spam.log', // Detailed spam log with raw emails
-            'hash_detection' => true, // Temporarily disable due to database permission issues
+            'hash_detection' => false, // Disabled - method incomplete causing hang
             'hash_threshold' => 3, // Block after X identical emails
             'threshold' => 70, // Postfix spam detection threshold (30-90)
         ],
