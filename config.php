@@ -22,6 +22,10 @@ return [
     'api' => [
         'login_endpoint' => 'https://api.cyfordtechnologies.com/api/auth/v1/login', // Login URL
         'report_endpoint' => 'https://api.cyfordtechnologies.com/api/security/v1/report-ip', // Report URL
+        'analyze_spam_endpoint' => 'https://api.cyfordtechnologies.com/api/security/v1/analyze-spam', // Spam analysis URL
+        'check_spam_against_server' => true, // Enable server-side spam checking
+        'report_spam_to_server' => true, // Enable spam reporting to server
+        'spam_threshold' => 70, // Spam detection threshold (30-90)
         'credentials' => [
             'email' => env('API_EMAIL', ''),  // Account email for API login
             'password' => env('API_PASSWORD', ''),  // Account password for API login
@@ -45,9 +49,11 @@ return [
             'system_quarantine_path' => '/var/spool/postfix/quarantine', // System quarantine path (chroot accessible)
             'add_footer' => true, // Add spam filter footer to clean emails
             'footer_text' => '--- This email has been scanned by Cyford Web Armor ---',
+            'add_spam_headers' => true, // Add X-Spam headers to quarantined spam emails
             'spam_log_file' => '/var/log/cyford-security/spam.log', // Detailed spam log with raw emails
-            'hash_detection' => false, // Temporarily disable due to database permission issues
+            'hash_detection' => true, // Temporarily disable due to database permission issues
             'hash_threshold' => 3, // Block after X identical emails
+            'threshold' => 70, // Postfix spam detection threshold (30-90)
         ],
         'error_handling' => [
             'on_system_error' => 'pass', // Options: 'pass', 'fail', 'quarantine'

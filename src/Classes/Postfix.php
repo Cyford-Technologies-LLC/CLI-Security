@@ -236,9 +236,40 @@ class Postfix
         
         // If not caught by hash, check with spam filter
         if (!$skipSpamFilter) {
-            $isSpam = $spamFilter->isSpam($headers, $body);
-            if ($isSpam) {
-                $spamReason = $spamFilter->getLastSpamReason() ?? 'Spam filter detection';
+            // Check against API server if enabled
+            if ($config['api']['check_spam_against_server'] ?? true) {
+                try {
+                    $apiClient = new \Cyford\Security\Classes\ApiClient($config);
+                    $apiClient->login();
+                    
+                    $apiResult = $apiClient->analyzeSpam(
+                        $headers['From'] ?? '',
+                        $body,
+                        $emailData,
+                        [
+                            'threshold' => $config['api']['spam_threshold'] ?? $config['postfix']['spam_handling']['threshold'] ?? 70,
+                            'hostname' => gethostname()
+                        ]
+                    );
+                    
+                    if ($apiResult['status_code'] === 200 && isset($apiResult['response']['data']['spam_analysis'])) {
+                        $spamAnalysis = $apiResult['response']['data']['spam_analysis'];
+                        $isSpam = $spamAnalysis['is_spam'] ?? false;
+                        if ($isSpam) {
+                            $spamReason = 'API spam detection: ' . implode(', ', $spamAnalysis['factors'] ?? []);
+                        }
+                    }
+                } catch (Exception $e) {
+                    $logger->warning("API spam check failed: " . $e->getMessage());
+                }
+            }
+            
+            // Fallback to local spam filter if API didn't detect spam
+            if (!$isSpam) {
+                $isSpam = $spamFilter->isSpam($headers, $body);
+                if ($isSpam) {
+                    $spamReason = $spamFilter->getLastSpamReason() ?? 'Local spam filter detection';
+                }
             }
             
             // Record new hash pattern (spam or clean) for future reference
@@ -255,11 +286,28 @@ class Postfix
         if ($isSpam) {
             $logger->warning("Email flagged as spam. Reason: {$spamReason}");
             
-            // Send spam data to API if configured
-            $this->sendSpamToAPI($subject, $body, $headers, $logger);
+            // Report spam to server if enabled
+            if ($config['api']['report_spam_to_server'] ?? true) {
+                try {
+                    $apiClient = new \Cyford\Security\Classes\ApiClient($config);
+                    $apiClient->login();
+                    $apiClient->reportSpam([
+                        'email' => $headers['From'] ?? '',
+                        'content' => $subject . "\n\n" . $body
+                    ]);
+                    $logger->info("Spam reported to server successfully");
+                } catch (Exception $e) {
+                    $logger->warning("Failed to report spam to server: " . $e->getMessage());
+                }
+            }
             
             // Log detailed spam information
             $this->logSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
+            
+            // Add spam headers if configured
+            if ($config['postfix']['spam_handling']['add_spam_headers'] ?? true) {
+                $emailData = $this->addSpamHeaders($emailData, $spamReason, $logger);
+            }
             
             // Add footer to spam email if configured
             $emailData = $this->addFooterIfConfigured($emailData, true);

@@ -8,6 +8,7 @@ class ApiClient
 {
     private string $loginEndpoint;
     private string $reportEndpoint;
+    private string $analyzeSpamEndpoint;
     private string $email;
     private string $password;
     private ?string $token = null;
@@ -16,6 +17,7 @@ class ApiClient
     {
         $this->loginEndpoint = $config['api']['login_endpoint'];
         $this->reportEndpoint = $config['api']['report_endpoint'];
+        $this->analyzeSpamEndpoint = $config['api']['analyze_spam_endpoint'] ?? 'https://api.cyfordtechnologies.com/api/security/v1/analyze-spam';
         $this->email = $config['credentials']['email'];
         $this->password = $config['credentials']['password'];
 
@@ -87,6 +89,85 @@ class ApiClient
         } catch (Exception $e) {
             echo "IP report failed. Error: " . $e->getMessage() . "\n";
         }
+    }
+
+    /**
+     * Analyze email content for spam detection
+     *
+     * @param string $fromEmail Sender email address
+     * @param string $body Email body content
+     * @param array $headers Email headers
+     * @param array $options Additional options (ip, hostname, to_email, threshold)
+     * @return array API response
+     */
+    public function analyzeSpam(string $fromEmail, string $body, $headers, array $options = []): array
+    {
+        if (!$this->token) {
+            throw new RuntimeException("No token found. Please login first.");
+        }
+
+        $params = [
+            'IP' => $options['ip'] ?? '127.0.0.1',
+            'from_email' => $fromEmail,
+            'body' => $body,
+            'headers' => json_encode($this->parseRawHeaders($headers)),
+            'threshold' => $options['threshold'] ?? 70
+        ];
+
+        if (isset($options['hostname'])) $params['hostname'] = $options['hostname'];
+        if (isset($options['to_email'])) $params['to_email'] = $options['to_email'];
+
+        return $this->sendRequest(
+            $this->analyzeSpamEndpoint . '?' . http_build_query($params),
+            'GET',
+            [],
+            ['Authorization: Bearer ' . $this->token]
+        );
+    }
+
+    /**
+     * Report spam content to server
+     *
+     * @param array $options Optional parameters (IP, email, content)
+     * @return array API response
+     */
+    public function reportSpam(array $options = []): array
+    {
+        if (!$this->token) {
+            throw new RuntimeException("No token found. Please login first.");
+        }
+
+        $params = [];
+        if (isset($options['ip'])) $params['IP'] = $options['ip'];
+        if (isset($options['email'])) $params['email'] = $options['email'];
+        if (isset($options['content'])) $params['content'] = $options['content'];
+
+        return $this->sendRequest(
+            'https://api.cyfordtechnologies.com/api/security/v1/report-spam?' . http_build_query($params),
+            'POST',
+            [],
+            ['Authorization: Bearer ' . $this->token]
+        );
+    }
+
+    /**
+     * Parse raw headers string into array
+     */
+    private function parseRawHeaders($headers): array
+    {
+        if (is_array($headers)) return $headers;
+        
+        $parsed = [];
+        $lines = explode("\n", $headers);
+        
+        foreach ($lines as $line) {
+            if (strpos($line, ':') !== false) {
+                [$key, $value] = explode(':', $line, 2);
+                $parsed[trim($key)] = trim($value);
+            }
+        }
+        
+        return $parsed;
     }
 
     /**
