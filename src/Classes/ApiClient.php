@@ -118,9 +118,15 @@ class ApiClient
      */
     public function analyzeSpam(string $fromEmail, string $body, $headers, array $options = []): array
     {
+        echo "DEBUG: analyzeSpam called with fromEmail: $fromEmail\n";
+        echo "DEBUG: Body length: " . strlen($body) . "\n";
+        echo "DEBUG: Headers type: " . gettype($headers) . "\n";
+        
         if (!$this->token) {
             throw new RuntimeException("No token found. Please login first.");
         }
+        
+        echo "DEBUG: Token exists, building params...\n";
 
         $params = [
             'IP' => $options['ip'] ?? '127.0.0.1',
@@ -132,6 +138,9 @@ class ApiClient
 
         if (isset($options['hostname'])) $params['hostname'] = $options['hostname'];
         if (isset($options['to_email'])) $params['to_email'] = $options['to_email'];
+        
+        echo "DEBUG: Params built, about to call sendRequest...\n";
+        echo "DEBUG: URL will be: " . $this->analyzeSpamEndpoint . '?' . http_build_query($params) . "\n";
 
         return $this->sendRequest(
             $this->analyzeSpamEndpoint . '?' . http_build_query($params),

@@ -248,6 +248,10 @@ class Postfix
                     $apiClient->login();
                     $logger->info("DEBUG: Login completed successfully");
                     
+                    $logger->info("DEBUG: Checking config values...");
+                    $logger->info("DEBUG: api.spam_threshold = " . ($config['api']['spam_threshold'] ?? 'NOT SET'));
+                    $logger->info("DEBUG: postfix.spam_handling.threshold = " . ($config['postfix']['spam_handling']['threshold'] ?? 'NOT SET'));
+                    
                     $threshold = $config['api']['spam_threshold'] ?? $config['postfix']['spam_handling']['threshold'] ?? 70;
                     $logger->info("API spam check - threshold: {$threshold}, from: " . ($headers['From'] ?? 'unknown'));
                     
