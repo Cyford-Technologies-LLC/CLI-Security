@@ -238,25 +238,36 @@ class Postfix
         if (!$skipSpamFilter) {
             // Check against API server if enabled
             if ($config['api']['check_spam_against_server'] ?? true) {
+                $logger->info("Starting API spam check...");
                 try {
                     $apiClient = new \Cyford\Security\Classes\ApiClient($config);
                     $apiClient->login();
+                    
+                    $threshold = $config['api']['spam_threshold'] ?? $config['postfix']['spam_handling']['threshold'] ?? 70;
+                    $logger->info("API spam check - threshold: {$threshold}, from: " . ($headers['From'] ?? 'unknown'));
                     
                     $apiResult = $apiClient->analyzeSpam(
                         $headers['From'] ?? '',
                         $body,
                         $emailData,
                         [
-                            'threshold' => $config['api']['spam_threshold'] ?? $config['postfix']['spam_handling']['threshold'] ?? 70,
+                            'threshold' => $threshold,
                             'hostname' => gethostname()
                         ]
                     );
                     
+                    $logger->info("API response status: " . $apiResult['status_code']);
+                    $logger->info("API response data: " . json_encode($apiResult['response'] ?? []));
+                    
                     if ($apiResult['status_code'] === 200 && isset($apiResult['response']['data']['spam_analysis'])) {
                         $spamAnalysis = $apiResult['response']['data']['spam_analysis'];
                         $isSpam = $spamAnalysis['is_spam'] ?? false;
+                        $spamScore = $spamAnalysis['spam_score'] ?? 0;
+                        $logger->info("API spam analysis - is_spam: " . ($isSpam ? 'true' : 'false') . ", score: {$spamScore}");
+                        
                         if ($isSpam) {
                             $spamReason = 'API spam detection: ' . implode(', ', $spamAnalysis['factors'] ?? []);
+                            $logger->warning("Email flagged as spam by API: {$spamReason}");
                         }
                     }
                 } catch (Exception $e) {
@@ -291,10 +302,14 @@ class Postfix
                 try {
                     $apiClient = new \Cyford\Security\Classes\ApiClient($config);
                     $apiClient->login();
-                    $apiClient->reportSpam([
+                    $reportData = [
                         'email' => $headers['From'] ?? '',
                         'content' => $subject . "\n\n" . $body
-                    ]);
+                    ];
+                    $logger->info("Reporting spam to server - from: " . ($headers['From'] ?? 'unknown'));
+                    
+                    $reportResult = $apiClient->reportSpam($reportData);
+                    $logger->info("Spam report response: " . json_encode($reportResult));
                     $logger->info("Spam reported to server successfully");
                 } catch (Exception $e) {
                     $logger->warning("Failed to report spam to server: " . $e->getMessage());
