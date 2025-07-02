@@ -196,11 +196,19 @@ class ApiClient
     {
         $ch = curl_init();
 
+        echo "DEBUG: Starting API request to: $url\n";
+        echo "DEBUG: Method: $method\n";
+        echo "DEBUG: Headers: " . json_encode($headers) . "\n";
+        
         $defaultOptions = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CUSTOMREQUEST => strtoupper($method),
             CURLOPT_HTTPHEADER => $headers,
-            CURLOPT_TIMEOUT => 45,
+            CURLOPT_TIMEOUT => 10, // Reduced timeout
+            CURLOPT_CONNECTTIMEOUT => 5, // Connection timeout
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_VERBOSE => true
         ];
 
         if ($method === 'POST') {
@@ -210,10 +218,16 @@ class ApiClient
         $finalOptions = $defaultOptions + $options;
         $finalOptions[CURLOPT_URL] = $url;
 
+        echo "DEBUG: Setting cURL options...\n";
         curl_setopt_array($ch, $finalOptions);
-
+        
+        echo "DEBUG: Executing cURL request...\n";
         $response = curl_exec($ch);
+        echo "DEBUG: cURL execution completed\n";
+        
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        echo "DEBUG: HTTP Code: $httpCode\n";
+        echo "DEBUG: Response length: " . strlen($response ?: '') . "\n";
 
         if (curl_errno($ch)) {
             $errorMessage = curl_error($ch);
