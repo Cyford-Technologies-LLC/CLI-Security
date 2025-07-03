@@ -187,8 +187,13 @@ class Postfix
                         }
 
                         $logger->info("DEBUG: Checking config values...");
-                        $logger
-
+                        // Continue with API spam check logic here
+                    } catch (Exception $e) {
+                        $logger->error("API spam check failed: " . $e->getMessage());
+                    }
+                }
+            }
+        }
 
         if ($isSpam) {
             $logger->warning("Email flagged as spam. Reason: {$spamReason}");
