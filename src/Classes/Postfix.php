@@ -233,6 +233,26 @@ class Postfix
             }
         } else {
             $logger->info("Hash detection is disabled");
+        }ubject, $body)) {
+                    $isSpam = true;
+                    $spamReason = 'Known spam pattern (hash match)';
+                    $skipSpamFilter = true;
+                    $logger->info("Email flagged as spam by hash detection.");
+                }
+                // Check if this hash is known clean
+                elseif ($database->isKnownCleanHash($subject, $body)) {
+                    $isSpam = false;
+                    $spamReason = 'Known clean pattern (hash match)';
+                    $skipSpamFilter = true;
+                    $logger->info("Email marked as clean by hash detection - skipping spam filter.");
+                } else {
+                    $logger->info("No hash match found, will proceed to spam filter");
+                }
+            } catch (Exception $e) {
+                $logger->warning("Database unavailable, skipping hash detection: " . $e->getMessage());
+            }
+        } else {
+            $logger->info("Hash detection is disabled");
         }
         
         // If not caught by hash, check with spam filter
@@ -269,8 +289,16 @@ class Postfix
                     $threshold = $config['api']['spam_threshold'] ?? $config['postfix']['spam_handling']['threshold'] ?? 70;
                     $logger->info("API spam check - threshold: {$threshold}, from: " . ($headers['From'] ?? 'unknown'));
                     
+                    // Extract clean email address from From header
+                    $fromEmail = $headers['From'] ?? '';
+                    if (preg_match('/<([^>]+)>/', $fromEmail, $matches)) {
+                        $fromEmail = $matches[1]; // Extract email from <email@domain.com>
+                    } elseif (preg_match('/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/', $fromEmail, $matches)) {
+                        $fromEmail = $matches[1]; // Extract email with regex
+                    }
+                    
                     $apiResult = $apiClient->analyzeSpam(
-                        $headers['From'] ?? '',
+                        $fromEmail,
                         $body,
                         $headers,
                         [
