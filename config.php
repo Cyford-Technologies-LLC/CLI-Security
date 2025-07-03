@@ -54,6 +54,16 @@ return [
             'hash_detection' => true, // Enable hash-based duplicate spam detection
             'hash_threshold' => 3, // Block after X identical emails
             'threshold' => 70, // Postfix spam detection threshold (30-90)
+            'threat_detection' => [
+                'enabled' => true, // Enable modular threat detection
+                'local_first' => true, // Check local algorithms before API
+                'categories' => [
+                    'spam' => ['enabled' => true, 'threshold' => 70],
+                    'phishing' => ['enabled' => true, 'threshold' => 50],
+                    'virus' => ['enabled' => true, 'threshold' => 80],
+                    'malware' => ['enabled' => true, 'threshold' => 75]
+                ]
+            ]
         ],
         'error_handling' => [
             'on_system_error' => 'pass', // Options: 'pass', 'fail', 'quarantine'

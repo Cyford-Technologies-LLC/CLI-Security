@@ -112,6 +112,26 @@ class Internal
                 $this->listBackups();
                 break;
                 
+            case 'view-algorithms':
+                $this->viewDetectionAlgorithms($args['category'] ?? null);
+                break;
+                
+            case 'export-algorithms':
+                $this->exportDetectionAlgorithms($args['format'] ?? 'json');
+                break;
+                
+            case 'import-algorithms':
+                $this->importDetectionAlgorithms($args['file'] ?? '');
+                break;
+                
+            case 'algorithm-stats':
+                $this->showAlgorithmStats();
+                break;
+                
+            case 'sync-algorithms':
+                $this->syncAlgorithms();
+                break;
+                
             default:
                 $this->showHelp();
         }
@@ -259,6 +279,220 @@ class Internal
      * Test spam filter with sample content
      */
     private function testSpamFilter(string $subject, string $body): void
+    {
+        if (empty($subject) && empty($body)) {
+            echo "Usage: --command=test-spam-filter --subject='Test Subject' --body='Test Body'\n";
+            return;
+        }
+        
+        try {
+            $spamFilter = new SpamFilter($this->config);
+            $headers = ['Subject' => $subject];
+            
+            $isSpam = $spamFilter->isSpam($headers, $body);
+            
+            echo "🔍 Spam Filter Test Results:\n";
+            echo "Subject: $subject\n";
+            echo "Body: " . substr($body, 0, 100) . "...\n";
+            echo "Result: " . ($isSpam ? "❌ SPAM" : "✅ CLEAN") . "\n";
+            
+            if ($isSpam) {
+                echo "Reason: " . $spamFilter->getLastSpamReason() . "\n";
+            }
+            
+        } catch (\Exception $e) {
+            echo "❌ Spam filter test failed: " . $e->getMessage() . "\n";
+        }
+    }
+    
+    /**
+     * View detection algorithms
+     */
+    private function viewDetectionAlgorithms(?string $category): void
+    {
+        try {
+            $database = new Database($this->config);
+            $algorithms = $database->getDetectionAlgorithms($category);
+            
+            $title = $category ? "Detection Algorithms - Category: $category" : "All Detection Algorithms";
+            echo "📋 $title\n";
+            echo str_repeat("=", 80) . "\n";
+            
+            if (empty($algorithms)) {
+                echo "No algorithms found.\n";
+                return;
+            }
+            
+            foreach ($algorithms as $algo) {
+                echo "ID: {$algo['id']} | Server ID: " . ($algo['server_id'] ?? 'N/A') . "\n";
+                echo "Name: {$algo['name']}\n";
+                echo "Category: {$algo['threat_category']} | Type: {$algo['detection_type']}\n";
+                echo "Target: {$algo['target']} | Score: {$algo['score']}\n";
+                echo "Pattern: " . substr($algo['pattern'], 0, 60) . "...\n";
+                echo "Enabled: " . ($algo['enabled'] ? 'Yes' : 'No') . " | Priority: {$algo['priority']}\n";
+                echo "Created: {$algo['created_at']} | Updated: {$algo['updated_at']}\n";
+                echo str_repeat("-", 80) . "\n";
+            }
+            
+            echo "Total: " . count($algorithms) . " algorithms\n";
+            
+        } catch (\Exception $e) {
+            echo "❌ Failed to view algorithms: " . $e->getMessage() . "\n";
+        }
+    }
+    
+    /**
+     * Export detection algorithms
+     */
+    private function exportDetectionAlgorithms(string $format): void
+    {
+        try {
+            $database = new Database($this->config);
+            $algorithms = $database->getDetectionAlgorithms();
+            
+            $filename = 'detection_algorithms_' . date('Y-m-d_H-i-s');
+            
+            switch (strtolower($format)) {
+                case 'json':
+                    $filename .= '.json';
+                    $content = json_encode($algorithms, JSON_PRETTY_PRINT);
+                    break;
+                    
+                case 'csv':
+                    $filename .= '.csv';
+                    $content = $this->arrayToCsv($algorithms);
+                    break;
+                    
+                default:
+                    echo "❌ Unsupported format. Use 'json' or 'csv'\n";
+                    return;
+            }
+            
+            file_put_contents($filename, $content);
+            echo "✅ Algorithms exported to: $filename\n";
+            echo "📊 Exported " . count($algorithms) . " algorithms\n";
+            
+        } catch (\Exception $e) {
+            echo "❌ Export failed: " . $e->getMessage() . "\n";
+        }
+    }
+    
+    /**
+     * Show algorithm statistics
+     */
+    private function showAlgorithmStats(): void
+    {
+        try {
+            $database = new Database($this->config);
+            $allAlgorithms = $database->getDetectionAlgorithms();
+            
+            $categories = [];
+            $enabled = 0;
+            
+            foreach ($allAlgorithms as $algo) {
+                $categories[$algo['threat_category']] = ($categories[$algo['threat_category']] ?? 0) + 1;
+                if ($algo['enabled']) $enabled++;
+            }
+            
+            echo "📊 Detection Algorithm Statistics:\n";
+            echo "Total: " . count($allAlgorithms) . " | Enabled: $enabled\n";
+            
+            foreach ($categories as $category => $count) {
+                echo "$category: $count\n";
+            }
+            
+        } catch (\Exception $e) {
+            echo "❌ Failed to get stats: " . $e->getMessage() . "\n";
+        }
+    }
+    
+    /**
+     * Convert array to CSV
+     */
+    private function arrayToCsv(array $data): string
+    {
+        if (empty($data)) return '';
+        
+        $output = fopen('php://temp', 'r+');
+        fputcsv($output, array_keys($data[0]));
+        
+        foreach ($data as $row) {
+            fputcsv($output, $row);
+        }
+        
+        rewind($output);
+        $csv = stream_get_contents($output);
+        fclose($output);
+        
+        return $csv;
+    }
+    
+    /**
+     * Sync algorithms - create DB and migrate existing algorithms
+     */
+    private function syncAlgorithms(): void
+    {
+        echo "🔄 Syncing Detection Algorithms...\n";
+        
+        try {
+            // Initialize database
+            $database = new Database($this->config);
+            echo "✅ Database initialized\n";
+            
+            // Migrate existing algorithms
+            $this->migrateExistingAlgorithms($database);
+            
+            // Clear cache
+            \Cyford\Security\Classes\ThreatCategory\BaseThreatDetector::clearCache();
+            echo "✅ Algorithm cache cleared\n";
+            
+            echo "🎉 Algorithm sync completed!\n";
+            
+        } catch (\Exception $e) {
+            echo "❌ Sync failed: " . $e->getMessage() . "\n";
+        }
+    }
+    
+    /**
+     * Migrate existing hard-coded algorithms to database
+     */
+    private function migrateExistingAlgorithms(Database $database): void
+    {
+        $algorithms = [
+            // Spam algorithms
+            ['name' => 'Suspicious Subject - Hello', 'threat_category' => 'spam', 'detection_type' => 'keyword', 'target' => 'subject', 'pattern' => 'hello', 'score' => 10],
+            ['name' => 'Suspicious Subject - Hi', 'threat_category' => 'spam', 'detection_type' => 'keyword', 'target' => 'subject', 'pattern' => 'hi', 'score' => 10],
+            ['name' => 'Suspicious Subject - Urgent', 'threat_category' => 'spam', 'detection_type' => 'keyword', 'target' => 'subject', 'pattern' => 'urgent', 'score' => 15],
+            ['name' => 'Spam Pattern - No Inquiry', 'threat_category' => 'spam', 'detection_type' => 'regex', 'target' => 'body', 'pattern' => '/(\\bno inquiryso resolve\\b)/i', 'score' => 25],
+            ['name' => 'Spam Pattern - Amounted Old', 'threat_category' => 'spam', 'detection_type' => 'regex', 'target' => 'body', 'pattern' => '/\\b(amounted old strictly|timed blind)\\b/i', 'score' => 20],
+            
+            // Phishing algorithms from config
+            ['name' => 'Phishing Keyword - Invoice', 'threat_category' => 'phishing', 'detection_type' => 'keyword', 'target' => 'subject,body', 'pattern' => 'invoice', 'score' => 15],
+            ['name' => 'Phishing Keyword - Payment', 'threat_category' => 'phishing', 'detection_type' => 'keyword', 'target' => 'subject,body', 'pattern' => 'payment', 'score' => 15],
+            ['name' => 'Phishing Keyword - Click Here', 'threat_category' => 'phishing', 'detection_type' => 'keyword', 'target' => 'body', 'pattern' => 'click here', 'score' => 20],
+            ['name' => 'Phishing Keyword - Verify Account', 'threat_category' => 'phishing', 'detection_type' => 'keyword', 'target' => 'body', 'pattern' => 'verify account', 'score' => 25],
+            
+            // Suspicious domains
+            ['name' => 'Suspicious Domain - bit.ly', 'threat_category' => 'phishing', 'detection_type' => 'domain', 'target' => 'body', 'pattern' => 'bit.ly', 'score' => 20],
+            ['name' => 'Suspicious Domain - tinyurl', 'threat_category' => 'phishing', 'detection_type' => 'domain', 'target' => 'body', 'pattern' => 'tinyurl.com', 'score' => 20],
+            ['name' => 'Malicious Domain - optussnet', 'threat_category' => 'malware', 'detection_type' => 'domain', 'target' => 'body', 'pattern' => 'optussnet.com.au', 'score' => 50],
+            ['name' => 'Malicious Domain - emlmind', 'threat_category' => 'malware', 'detection_type' => 'domain', 'target' => 'body', 'pattern' => 'emlmind.com', 'score' => 50],
+        ];
+        
+        $migrated = 0;
+        foreach ($algorithms as $algo) {
+            try {
+                $database->syncDetectionAlgorithm($algo);
+                $migrated++;
+            } catch (\Exception $e) {
+                echo "⚠️ Failed to migrate '{$algo['name']}': " . $e->getMessage() . "\n";
+            }
+        }
+        
+        echo "✅ Migrated $migrated algorithms to database\n";
+    }
+    
+    private function testSpamFilterOld(string $subject, string $body): void
     {
         if (empty($subject) && empty($body)) {
             echo "❌ Please provide --subject and/or --body parameters\n";
