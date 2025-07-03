@@ -136,6 +136,10 @@ class Internal
                 $this->recreateDatabase();
                 break;
                 
+            case 'drop-table':
+                $this->dropTable($args['table'] ?? 'detection_algorithms');
+                break;
+                
             default:
                 $this->showHelp();
         }
@@ -525,6 +529,29 @@ class Internal
             
         } catch (\Exception $e) {
             echo "❌ Database recreation failed: " . $e->getMessage() . "\n";
+        }
+    }
+    
+    /**
+     * Drop a specific table
+     */
+    private function dropTable(string $tableName): void
+    {
+        echo "🗑️ Dropping table: $tableName...\n";
+        
+        try {
+            $database = new Database($this->config);
+            $pdo = $database->getPDO();
+            
+            $pdo->exec("DROP TABLE IF EXISTS $tableName");
+            echo "✅ Table '$tableName' dropped successfully\n";
+            
+            // Recreate the table by reinitializing database
+            $database = new Database($this->config);
+            echo "✅ Table '$tableName' recreated with new structure\n";
+            
+        } catch (\Exception $e) {
+            echo "❌ Failed to drop table: " . $e->getMessage() . "\n";
         }
     }
     
