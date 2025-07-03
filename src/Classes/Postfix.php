@@ -243,11 +243,24 @@ class Postfix
                 $logger->info("DEBUG: About to create ApiClient instance");
                 try {
                     $logger->info("DEBUG: Creating ApiClient with config");
-                    $apiClient = new \Cyford\Security\Classes\ApiClient($config, $logger);
-                    $logger->info("DEBUG: ApiClient created successfully");
+                    $logger->info("DEBUG: API Email: " . ($config['api']['credentials']['email'] ?? 'NOT SET'));
+                    $logger->info("DEBUG: API Password: " . (empty($config['api']['credentials']['password']) ? 'NOT SET' : 'SET'));
+                    
+                    try {
+                        $apiClient = new \Cyford\Security\Classes\ApiClient($config, $logger);
+                        $logger->info("DEBUG: ApiClient created successfully");
+                    } catch (Exception $e) {
+                        $logger->error("ERROR: Failed to create ApiClient: " . $e->getMessage());
+                        throw $e;
+                    }
                     $logger->info("DEBUG: About to call login()");
-                    $apiClient->login();
-                    $logger->info("DEBUG: Login completed successfully");
+                    try {
+                        $apiClient->login();
+                        $logger->info("DEBUG: Login completed successfully");
+                    } catch (Exception $e) {
+                        $logger->error("ERROR: Login failed: " . $e->getMessage());
+                        throw $e;
+                    }
                     
                     $logger->info("DEBUG: Checking config values...");
                     $logger->info("DEBUG: api.spam_threshold = " . ($config['api']['spam_threshold'] ?? 'NOT SET'));
