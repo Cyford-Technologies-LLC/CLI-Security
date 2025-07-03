@@ -29,19 +29,277 @@ class Postfix
 
         // Ensure the backup directory exists
         if (!is_dir($this->backupDirectory)) {
-            if (!mkdir($this->backupDirectory, 0755, true)) {
+            if (!mkdir($concurrentDirectory = $this->backupDirectory, 0755, true) && !is_dir($concurrentDirectory)) {
                 // Fallback to /tmp if can't create in /var/backups
                 $this->backupDirectory = '/tmp/postfix_backups';
                 if (!is_dir($this->backupDirectory)) {
-                    mkdir($this->backupDirectory, 0755, true);
+                    if (!mkdir($concurrentDirectory = $this->backupDirectory, 0755, true) && !is_dir($concurrentDirectory)) {
+                        throw new \RuntimeException(sprintf('Directory "%s" was not created', $concurrentDirectory));
+                    }
                 }
             }
         }
     }
 
+    public function processEmail($spamFilter, $logger): void
+    {
+        global $config;
+        $errorHandling = $config['postfix']['error_handling'] ?? [];
+        $onSystemError = $errorHandling['on_system_error'] ?? 'pass';
+        $maxRetries = $errorHandling['max_retries'] ?? 3;
+        $retryDelay = $errorHandling['retry_delay'] ?? 1;
+        $failSafeMode = $errorHandling['fail_safe_mode'] ?? true;
+
+        $logger->info("Processing email received from Postfix...");
+
+        // Wrap email processing in error handling
+        for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
+            try {
+                $this->processEmailInternal($spamFilter, $logger);
+                return; // Success - exit retry loop
+            } catch (Exception $e) {
+                $this->logSystemError($e, $attempt, $logger);
+
+                if ($attempt < $maxRetries) {
+                    $logger->warning("Attempt {$attempt} failed, retrying in {$retryDelay} seconds...");
+                    sleep($retryDelay);
+                    continue;
+                }
+
+                // All retries exhausted - handle according to config
+                $this->handleSystemError($e, $onSystemError, $failSafeMode, $logger);
+                return;
+            }
+        }
+    }
+
+    /**
+     * Internal email processing (original processEmail logic)
+     */
+    private function processEmailInternal($spamFilter, $logger): void
+    {
+        // Skip configuration check during email processing
+        // This prevents autoConfig from running during email processing
+
+        // Read email data from stdin
+        $emailData = file_get_contents('php://stdin');
+        if (!$emailData) {
+            throw new RuntimeException("No email data received from Postfix.");
+        }
+        $logger->info("Raw email data successfully read.");
+
+        // Parse headers and body
+        list($headers, $body) = $this->parseEmail($emailData);
+        $logger->info("Parsed headers: " . json_encode($headers));
+
+        // Skip system/security emails to prevent loops
+        if ($this->shouldSkipEmail($headers, $logger)) {
+            exit(0);
+        }
+
+        // Check if already processed
+        if ($this->isAlreadyProcessed($headers, $emailData, $logger)) {
+            return;
+        }
+
+        // Get recipient with multiple fallback methods
+        $recipient = $this->getRecipient($headers, $logger);
+        if (empty($recipient)) {
+            $logger->error("Recipient not found or invalid in email headers.");
+            throw new RuntimeException("Recipient not found or invalid in email headers.");
+        }
+        $logger->info("Recipient resolved: {$recipient}");
+
+        $subject = $headers['Subject'] ?? '';
+        $isSpam = false;
+        $spamReason = '';
+
+        // Check hash-based detection first (if enabled)
+        global $config;
+        $database = null;
+        $skipSpamFilter = false;
+
+        $logger->info("Starting hash detection check...");
+        if ($config['postfix']['spam_handling']['hash_detection'] ?? false) {
+            $logger->info("Hash detection is enabled, initializing database...");
+            try {
+                $database = new \Cyford\Security\Classes\Database($config);
+                $logger->info("Database initialized successfully");
+
+                // Check if this hash is known spam
+                $logger->info("Checking for known spam hash...");
+                if ($database->isKnownSpamHash($subject, $body)) {
+                    $isSpam = true;
+                    $spamReason = 'Known spam pattern (hash match)';
+                    $skipSpamFilter = true;
+                    $logger->info("Email flagged as spam by hash detection.");
+                }
+                // Check if this hash is known clean
+                elseif ($database->isKnownCleanHash($subject, $body)) {
+                    $isSpam = false;
+                    $spamReason = 'Known clean pattern (hash match)';
+                    $skipSpamFilter = true;
+                    $logger->info("Email marked as clean by hash detection - skipping spam filter.");
+                } else {
+                    $logger->info("No hash match found, will proceed to spam filter");
+                }
+            } catch (Exception $e) {
+                $logger->warning("Database unavailable, skipping hash detection: " . $e->getMessage());
+            }
+        } else {
+            $logger->info("Hash detection is disabled");
+        }
+
+        // If not caught by hash, check with spam filter
+        if (!$skipSpamFilter) {
+            // Check against API server if enabled
+            if ($config['api']['check_spam_against_server'] ?? true) {
+                $logger->info("Starting API spam check...");
+                $logger->info("DEBUG: About to create ApiClient instance");
+                try {
+                    $logger->info("DEBUG: Creating ApiClient with config");
+                    $logger->info("DEBUG: API Email: " . ($config['api']['credentials']['email'] ?? 'NOT SET'));
+                    $logger->info("DEBUG: API Password: " . (empty($config['api']['credentials']['password']) ? 'NOT SET' : 'SET'));
+
+                    try {
+                        $apiClient = new \Cyford\Security\Classes\ApiClient($config, $logger);
+                        $logger->info("DEBUG: ApiClient created successfully");
+                    } catch (Exception $e) {
+                        $logger->error("ERROR: Failed to create ApiClient: " . $e->getMessage());
+                        throw $e;
+                    }
+                    $logger->info("DEBUG: About to call login()");
+                    try {
+                        $apiClient->login();
+                        $logger->info("DEBUG: Login completed successfully");
+                    } catch (Exception $e) {
+                        $logger->error("ERROR: Login failed: " . $e->getMessage());
+                        throw $e;
+                    }
+
+                    $logger->info("DEBUG: Checking config values...");
+                    $logger->info("DEBUG: api.spam_threshold = " . ($config['api']['spam_threshold'] ?? 'NOT SET'));
+                    $logger->info("DEBUG: postfix.spam_handling.threshold = " . ($config['postfix']['spam_handling']['threshold'] ?? 'NOT SET'));
+
+                    $threshold = $config['api']['spam_threshold'] ?? $config['postfix']['spam_handling']['threshold'] ?? 70;
+                    $logger->info("API spam check - threshold: {$threshold}, from: " . ($headers['From'] ?? 'unknown'));
+
+                    // Extract clean email address from From header
+                    $fromEmail = $headers['From'] ?? '';
+                    if (preg_match('/<([^>]+)>/', $fromEmail, $matches)) {
+                        $fromEmail = $matches[1]; // Extract email from <email@domain.com>
+                    } elseif (preg_match('/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/', $fromEmail, $matches)) {
+                        $fromEmail = $matches[1]; // Extract email with regex
+                    }
+
+                    $apiResult = $apiClient->analyzeSpam(
+                        $fromEmail,
+                        $body,
+                        $headers,
+                        [
+                            'threshold' => $threshold,
+                            'hostname' => gethostname()
+                        ]
+                    );
+
+                    $logger->info("API response status: " . $apiResult['status_code']);
+                    $logger->info("API response data: " . json_encode($apiResult['response'] ?? []));
+
+                    if ($apiResult['status_code'] === 200 && isset($apiResult['response']['data']['spam_analysis'])) {
+                        $spamAnalysis = $apiResult['response']['data']['spam_analysis'];
+                        $isSpam = $spamAnalysis['is_spam'] ?? false;
+                        $spamScore = $spamAnalysis['spam_score'] ?? 0;
+                        $logger->info("API spam analysis - is_spam: " . ($isSpam ? 'true' : 'false') . ", score: {$spamScore}");
+
+                        if ($isSpam) {
+                            $spamReason = 'API spam detection: ' . implode(', ', $spamAnalysis['factors'] ?? []);
+                            $logger->warning("Email flagged as spam by API: {$spamReason}");
+                        }
+                    }
+                } catch (Exception $e) {
+                    $logger->warning("API spam check failed: " . $e->getMessage());
+                }
+            }
+
+            // Fallback to local spam filter if API didn't detect spam
+            if (!$isSpam) {
+                $isSpam = $spamFilter->isSpam($headers, $body);
+                if ($isSpam) {
+                    $spamReason = $spamFilter->getLastSpamReason() ?? 'Local spam filter detection';
+                }
+            }
+
+            // Record new hash pattern (spam or clean) for future reference
+            if ($database) {
+                try {
+                    $database->recordEmailHash($subject, $body, $isSpam);
+                    $logger->info("Email hash recorded as " . ($isSpam ? 'spam' : 'clean') . " for future detection");
+                } catch (Exception $e) {
+                    $logger->warning("Failed to record email hash: " . $e->getMessage());
+                }
+            }
+        }
+
+        if ($isSpam) {
+            $logger->warning("Email flagged as spam. Reason: {$spamReason}");
+
+            // Report spam to server if enabled
+            if ($config['api']['report_spam_to_server'] ?? true) {
+                try {
+                    $apiClient = new \Cyford\Security\Classes\ApiClient($config);
+                    $apiClient->login();
+                    $reportData = [
+                        'email' => $headers['From'] ?? '',
+                        'content' => $subject . "\n\n" . $body
+                    ];
+                    $logger->info("Reporting spam to server - from: " . ($headers['From'] ?? 'unknown'));
+
+                    $reportResult = $apiClient->reportSpam($reportData);
+                    $logger->info("Spam report response: " . json_encode($reportResult));
+                    $logger->info("Spam reported to server successfully");
+                } catch (Exception $e) {
+                    $logger->warning("Failed to report spam to server: " . $e->getMessage());
+                }
+            }
+
+            // Log detailed spam information
+            $this->logSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
+
+            // Add spam headers if configured
+            if ($config['postfix']['spam_handling']['add_spam_headers'] ?? true) {
+                $emailData = $this->addSpamHeaders($emailData, $spamReason, $logger);
+            }
+
+            // Add footer to spam email if configured
+            $emailData = $this->addFooterIfConfigured($emailData, true);
+
+            // Check spam handling method FIRST
+            $spamHandlingMethod = $config['postfix']['spam_handling_method'] ?? 'requeue';
+            if ($spamHandlingMethod === 'maildir') {
+                $logger->info("Using maildir spam handling method");
+                $this->deliverSpamToMaildir($emailData, $recipient, $logger);
+                return;
+            }
+
+            $logger->info("Using standard spam handling method: {$spamHandlingMethod}");
+            $this->handleSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
+            return;
+        }
+
+        $logger->info("Email is clean of spam. Proceeding with requeue.");
+
+        // Add footer if configured
+        $emailData = $this->addFooterIfConfigured($emailData);
+
+        $this->requeueEmail($emailData, $recipient, $logger);
+    }
+
+
+
     /**
      * Check if Postfix is configured for integration.
      */
+
     public function checkConfig(): bool
     {
         $masterConfig = file_exists($this->masterConfigPath) ? file_get_contents($this->masterConfigPath) : '';
@@ -125,279 +383,7 @@ class Postfix
     /**
      * Process email from Postfix content filter with error handling
      */
-    public function processEmail($spamFilter, $logger): void
-    {
-        global $config;
-        $errorHandling = $config['postfix']['error_handling'] ?? [];
-        $onSystemError = $errorHandling['on_system_error'] ?? 'pass';
-        $maxRetries = $errorHandling['max_retries'] ?? 3;
-        $retryDelay = $errorHandling['retry_delay'] ?? 1;
-        $failSafeMode = $errorHandling['fail_safe_mode'] ?? true;
-        
-        $logger->info("Processing email received from Postfix...");
-        
-        // Wrap email processing in error handling
-        for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
-            try {
-                $this->processEmailInternal($spamFilter, $logger);
-                return; // Success - exit retry loop
-            } catch (Exception $e) {
-                $this->logSystemError($e, $attempt, $logger);
-                
-                if ($attempt < $maxRetries) {
-                    $logger->warning("Attempt {$attempt} failed, retrying in {$retryDelay} seconds...");
-                    sleep($retryDelay);
-                    continue;
-                }
-                
-                // All retries exhausted - handle according to config
-                $this->handleSystemError($e, $onSystemError, $failSafeMode, $logger);
-                return;
-            }
-        }
-    }
-    
-    /**
-     * Internal email processing (original processEmail logic)
-     */
-    private function processEmailInternal($spamFilter, $logger): void
-    {
-        
-        // Skip configuration check during email processing
-        // This prevents autoConfig from running during email processing
 
-        // Read email data from stdin
-        $emailData = file_get_contents('php://stdin');
-        if (!$emailData) {
-            throw new RuntimeException("No email data received from Postfix.");
-        }
-        $logger->info("Raw email data successfully read.");
-
-        // Parse headers and body
-        list($headers, $body) = $this->parseEmail($emailData);
-        $logger->info("Parsed headers: " . json_encode($headers));
-
-        // Skip system/security emails to prevent loops
-        if ($this->shouldSkipEmail($headers, $logger)) {
-            exit(0);
-        }
-
-        // Check if already processed
-        if ($this->isAlreadyProcessed($headers, $emailData, $logger)) {
-            return;
-        }
-
-        // Get recipient with multiple fallback methods
-        $recipient = $this->getRecipient($headers, $logger);
-        if (empty($recipient)) {
-            $logger->error("Recipient not found or invalid in email headers.");
-            throw new RuntimeException("Recipient not found or invalid in email headers.");
-        }
-        $logger->info("Recipient resolved: {$recipient}");
-        
-        $subject = $headers['Subject'] ?? '';
-        $isSpam = false;
-        $spamReason = '';
-        
-        // Check hash-based detection first (if enabled)
-        global $config;
-        $database = null;
-        $skipSpamFilter = false;
-        
-        $logger->info("Starting hash detection check...");
-        if ($config['postfix']['spam_handling']['hash_detection'] ?? false) {
-            $logger->info("Hash detection is enabled, initializing database...");
-            try {
-                $database = new \Cyford\Security\Classes\Database($config);
-                $logger->info("Database initialized successfully");
-                
-                // Check if this hash is known spam
-                $logger->info("Checking for known spam hash...");
-                if ($database->isKnownSpamHash($subject, $body)) {
-                    $isSpam = true;
-                    $spamReason = 'Known spam pattern (hash match)';
-                    $skipSpamFilter = true;
-                    $logger->info("Email flagged as spam by hash detection.");
-                }
-                // Check if this hash is known clean
-                elseif ($database->isKnownCleanHash($subject, $body)) {
-                    $isSpam = false;
-                    $spamReason = 'Known clean pattern (hash match)';
-                    $skipSpamFilter = true;
-                    $logger->info("Email marked as clean by hash detection - skipping spam filter.");
-                } else {
-                    $logger->info("No hash match found, will proceed to spam filter");
-                }
-            } catch (Exception $e) {
-                $logger->warning("Database unavailable, skipping hash detection: " . $e->getMessage());
-            }
-        } else {
-            $logger->info("Hash detection is disabled");
-        }ubject, $body)) {
-                    $isSpam = true;
-                    $spamReason = 'Known spam pattern (hash match)';
-                    $skipSpamFilter = true;
-                    $logger->info("Email flagged as spam by hash detection.");
-                }
-                // Check if this hash is known clean
-                elseif ($database->isKnownCleanHash($subject, $body)) {
-                    $isSpam = false;
-                    $spamReason = 'Known clean pattern (hash match)';
-                    $skipSpamFilter = true;
-                    $logger->info("Email marked as clean by hash detection - skipping spam filter.");
-                } else {
-                    $logger->info("No hash match found, will proceed to spam filter");
-                }
-            } catch (Exception $e) {
-                $logger->warning("Database unavailable, skipping hash detection: " . $e->getMessage());
-            }
-        } else {
-            $logger->info("Hash detection is disabled");
-        }
-        
-        // If not caught by hash, check with spam filter
-        if (!$skipSpamFilter) {
-            // Check against API server if enabled
-            if ($config['api']['check_spam_against_server'] ?? true) {
-                $logger->info("Starting API spam check...");
-                $logger->info("DEBUG: About to create ApiClient instance");
-                try {
-                    $logger->info("DEBUG: Creating ApiClient with config");
-                    $logger->info("DEBUG: API Email: " . ($config['api']['credentials']['email'] ?? 'NOT SET'));
-                    $logger->info("DEBUG: API Password: " . (empty($config['api']['credentials']['password']) ? 'NOT SET' : 'SET'));
-                    
-                    try {
-                        $apiClient = new \Cyford\Security\Classes\ApiClient($config, $logger);
-                        $logger->info("DEBUG: ApiClient created successfully");
-                    } catch (Exception $e) {
-                        $logger->error("ERROR: Failed to create ApiClient: " . $e->getMessage());
-                        throw $e;
-                    }
-                    $logger->info("DEBUG: About to call login()");
-                    try {
-                        $apiClient->login();
-                        $logger->info("DEBUG: Login completed successfully");
-                    } catch (Exception $e) {
-                        $logger->error("ERROR: Login failed: " . $e->getMessage());
-                        throw $e;
-                    }
-                    
-                    $logger->info("DEBUG: Checking config values...");
-                    $logger->info("DEBUG: api.spam_threshold = " . ($config['api']['spam_threshold'] ?? 'NOT SET'));
-                    $logger->info("DEBUG: postfix.spam_handling.threshold = " . ($config['postfix']['spam_handling']['threshold'] ?? 'NOT SET'));
-                    
-                    $threshold = $config['api']['spam_threshold'] ?? $config['postfix']['spam_handling']['threshold'] ?? 70;
-                    $logger->info("API spam check - threshold: {$threshold}, from: " . ($headers['From'] ?? 'unknown'));
-                    
-                    // Extract clean email address from From header
-                    $fromEmail = $headers['From'] ?? '';
-                    if (preg_match('/<([^>]+)>/', $fromEmail, $matches)) {
-                        $fromEmail = $matches[1]; // Extract email from <email@domain.com>
-                    } elseif (preg_match('/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/', $fromEmail, $matches)) {
-                        $fromEmail = $matches[1]; // Extract email with regex
-                    }
-                    
-                    $apiResult = $apiClient->analyzeSpam(
-                        $fromEmail,
-                        $body,
-                        $headers,
-                        [
-                            'threshold' => $threshold,
-                            'hostname' => gethostname()
-                        ]
-                    );
-                    
-                    $logger->info("API response status: " . $apiResult['status_code']);
-                    $logger->info("API response data: " . json_encode($apiResult['response'] ?? []));
-                    
-                    if ($apiResult['status_code'] === 200 && isset($apiResult['response']['data']['spam_analysis'])) {
-                        $spamAnalysis = $apiResult['response']['data']['spam_analysis'];
-                        $isSpam = $spamAnalysis['is_spam'] ?? false;
-                        $spamScore = $spamAnalysis['spam_score'] ?? 0;
-                        $logger->info("API spam analysis - is_spam: " . ($isSpam ? 'true' : 'false') . ", score: {$spamScore}");
-                        
-                        if ($isSpam) {
-                            $spamReason = 'API spam detection: ' . implode(', ', $spamAnalysis['factors'] ?? []);
-                            $logger->warning("Email flagged as spam by API: {$spamReason}");
-                        }
-                    }
-                } catch (Exception $e) {
-                    $logger->warning("API spam check failed: " . $e->getMessage());
-                }
-            }
-            
-            // Fallback to local spam filter if API didn't detect spam
-            if (!$isSpam) {
-                $isSpam = $spamFilter->isSpam($headers, $body);
-                if ($isSpam) {
-                    $spamReason = $spamFilter->getLastSpamReason() ?? 'Local spam filter detection';
-                }
-            }
-            
-            // Record new hash pattern (spam or clean) for future reference
-            if ($database) {
-                try {
-                    $database->recordEmailHash($subject, $body, $isSpam);
-                    $logger->info("Email hash recorded as " . ($isSpam ? 'spam' : 'clean') . " for future detection");
-                } catch (Exception $e) {
-                    $logger->warning("Failed to record email hash: " . $e->getMessage());
-                }
-            }
-        }
-
-        if ($isSpam) {
-            $logger->warning("Email flagged as spam. Reason: {$spamReason}");
-            
-            // Report spam to server if enabled
-            if ($config['api']['report_spam_to_server'] ?? true) {
-                try {
-                    $apiClient = new \Cyford\Security\Classes\ApiClient($config);
-                    $apiClient->login();
-                    $reportData = [
-                        'email' => $headers['From'] ?? '',
-                        'content' => $subject . "\n\n" . $body
-                    ];
-                    $logger->info("Reporting spam to server - from: " . ($headers['From'] ?? 'unknown'));
-                    
-                    $reportResult = $apiClient->reportSpam($reportData);
-                    $logger->info("Spam report response: " . json_encode($reportResult));
-                    $logger->info("Spam reported to server successfully");
-                } catch (Exception $e) {
-                    $logger->warning("Failed to report spam to server: " . $e->getMessage());
-                }
-            }
-            
-            // Log detailed spam information
-            $this->logSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
-            
-            // Add spam headers if configured
-            if ($config['postfix']['spam_handling']['add_spam_headers'] ?? true) {
-                $emailData = $this->addSpamHeaders($emailData, $spamReason, $logger);
-            }
-            
-            // Add footer to spam email if configured
-            $emailData = $this->addFooterIfConfigured($emailData, true);
-            
-            // Check spam handling method FIRST
-            $spamHandlingMethod = $config['postfix']['spam_handling_method'] ?? 'requeue';
-            if ($spamHandlingMethod === 'maildir') {
-                $logger->info("Using maildir spam handling method");
-                $this->deliverSpamToMaildir($emailData, $recipient, $logger);
-                return;
-            }
-            
-            $logger->info("Using standard spam handling method: {$spamHandlingMethod}");
-            $this->handleSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
-            return;
-        }
-
-        $logger->info("Email is clean of spam. Proceeding with requeue.");
-        
-        // Add footer if configured
-        $emailData = $this->addFooterIfConfigured($emailData);
-        
-        $this->requeueEmail($emailData, $recipient, $logger);
-    }
 
     /**
      * Remove old security-related entries from master.cf
