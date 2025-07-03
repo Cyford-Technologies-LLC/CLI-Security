@@ -23,7 +23,7 @@ return [
         'login_endpoint' => 'https://api.cyfordtechnologies.com/api/auth/v1/login', // Login URL
         'report_endpoint' => 'https://api.cyfordtechnologies.com/api/security/v1/report-ip', // Report URL
         'analyze_spam_endpoint' => 'https://api.cyfordtechnologies.com/api/security/v1/analyze-spam', // Spam analysis URL
-        'check_spam_against_server' => false, // Enable server-side spam checking
+        'check_spam_against_server' => true, // Enable server-side spam checking
         'report_spam_to_server' => false, // Enable spam reporting to server
         'spam_threshold' => 70, // Spam detection threshold (30-90)
         'credentials' => [
