@@ -21,7 +21,7 @@ abstract class BaseThreatDetector
      */
     protected function getAlgorithms(): array
     {
-        $cacheKey = "algorithms_{$this->category}";
+        $cacheKey = "algorithms_$this->category";
         
         if (!isset(self::$algorithmCache[$cacheKey])) {
             self::$algorithmCache[$cacheKey] = $this->database->getDetectionAlgorithms($this->category);
@@ -37,9 +37,10 @@ abstract class BaseThreatDetector
     {
         self::$algorithmCache = [];
     }
-    
+
     /**
      * Execute a single algorithm
+     * @throws \JsonException
      */
     protected function executeAlgorithm(array $algorithm, array $headers, string $body): bool
     {
@@ -71,9 +72,10 @@ abstract class BaseThreatDetector
                 return false;
         }
     }
-    
+
     /**
      * Get content based on target specification
+     * @throws \JsonException
      */
     private function getTargetContent(string $target, array $headers, string $body): string
     {
@@ -93,7 +95,7 @@ abstract class BaseThreatDetector
                     $content .= ' ' . ($headers['From'] ?? '');
                     break;
                 case 'headers':
-                    $content .= ' ' . json_encode($headers);
+                    $content .= ' ' . json_encode($headers, JSON_THROW_ON_ERROR);
                     break;
             }
         }
@@ -115,13 +117,14 @@ abstract class BaseThreatDetector
         }
         return false;
     }
-    
+
     /**
      * Check header patterns
+     * @throws \JsonException
      */
     private function checkHeader(array $headers, string $pattern): bool
     {
-        $headerString = json_encode($headers);
+        $headerString = json_encode($headers, JSON_THROW_ON_ERROR);
         return stripos($headerString, $pattern) !== false;
     }
     
