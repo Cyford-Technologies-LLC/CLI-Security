@@ -108,7 +108,7 @@ class Database
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     server_id INTEGER,
                     name TEXT NOT NULL,
-                    threat_category TEXT NOT NULL,
+                    ThreatCategory TEXT NOT NULL,
                     detection_type TEXT NOT NULL,
                     target TEXT NOT NULL,
                     pattern TEXT NOT NULL,
@@ -136,7 +136,7 @@ class Database
             'CREATE INDEX IF NOT EXISTS idx_spam_hashes_body ON spam_hashes(body_hash)',
             'CREATE INDEX IF NOT EXISTS idx_cache_expires ON cache(expires_at)',
             'CREATE INDEX IF NOT EXISTS idx_detection_algorithms_server_id ON detection_algorithms(server_id)',
-            'CREATE INDEX IF NOT EXISTS idx_detection_algorithms_category ON detection_algorithms(threat_category)',
+            'CREATE INDEX IF NOT EXISTS idx_detection_algorithms_category ON detection_algorithms(ThreatCategory)',
             'CREATE INDEX IF NOT EXISTS idx_detection_algorithms_enabled ON detection_algorithms(enabled)',
             'CREATE UNIQUE INDEX IF NOT EXISTS idx_detection_algorithms_server_unique ON detection_algorithms(server_id) WHERE server_id IS NOT NULL'
         ];
@@ -505,13 +505,13 @@ class Database
     /**
      * Get all enabled detection algorithms by category
      */
-    public function getDetectionAlgorithms(string $category = null): array
+    public function getDetectionAlgorithms(?string $category = null): array
     {
         $sql = "SELECT * FROM detection_algorithms WHERE enabled = 1";
         $params = [];
         
         if ($category) {
-            $sql .= " AND threat_category = ?";
+            $sql .= " AND ThreatCategory = ?";
             $params[] = $category;
         }
         
@@ -531,14 +531,14 @@ class Database
         if (isset($data['server_id'])) {
             // Update existing algorithm
             $sql = "UPDATE detection_algorithms SET 
-                    name = ?, threat_category = ?, detection_type = ?, target = ?, 
+                    name = ?, ThreatCategory = ?, detection_type = ?, target = ?, 
                     pattern = ?, score = ?, enabled = ?, priority = ?, 
                     updated_at = CURRENT_TIMESTAMP, server_updated_at = CURRENT_TIMESTAMP
                     WHERE server_id = ?";
             
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute([
-                $data['name'], $data['threat_category'], $data['detection_type'],
+                $data['name'], $data['ThreatCategory'], $data['detection_type'],
                 $data['target'], $data['pattern'], $data['score'],
                 $data['enabled'] ?? 1, $data['priority'] ?? 0, $data['server_id']
             ]);
@@ -558,12 +558,12 @@ class Database
     private function insertDetectionAlgorithm(array $data): void
     {
         $sql = "INSERT INTO detection_algorithms 
-                (server_id, name, threat_category, detection_type, target, pattern, score, enabled, priority, server_updated_at)
+                (server_id, name, ThreatCategory, detection_type, target, pattern, score, enabled, priority, server_updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
         
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([
-            $data['server_id'] ?? null, $data['name'], $data['threat_category'],
+            $data['server_id'] ?? null, $data['name'], $data['ThreatCategory'],
             $data['detection_type'], $data['target'], $data['pattern'],
             $data['score'] ?? 0, $data['enabled'] ?? 1, $data['priority'] ?? 0
         ]);
