@@ -132,6 +132,10 @@ class Internal
                 $this->syncAlgorithms();
                 break;
                 
+            case 'recreate-database':
+                $this->recreateDatabase();
+                break;
+                
             default:
                 $this->showHelp();
         }
@@ -490,6 +494,38 @@ class Internal
         }
         
         echo "✅ Migrated $migrated algorithms to database\n";
+    }
+    
+    /**
+     * Recreate database with all tables
+     */
+    private function recreateDatabase(): void
+    {
+        echo "🗑️ Recreating database...\n";
+        
+        try {
+            $dbPath = $this->config['database']['path'];
+            
+            // Remove existing database
+            if (file_exists($dbPath)) {
+                unlink($dbPath);
+                echo "✅ Old database removed\n";
+            }
+            
+            // Create new database with all tables
+            $database = new Database($this->config);
+            echo "✅ New database created with all tables\n";
+            
+            // Set permissions
+            exec("sudo chown postfix:postfix " . escapeshellarg($dbPath));
+            exec("sudo chmod 664 " . escapeshellarg($dbPath));
+            echo "✅ Database permissions set\n";
+            
+            echo "🎉 Database recreation completed!\n";
+            
+        } catch (\Exception $e) {
+            echo "❌ Database recreation failed: " . $e->getMessage() . "\n";
+        }
     }
     
     private function testSpamFilterOld(string $subject, string $body): void
