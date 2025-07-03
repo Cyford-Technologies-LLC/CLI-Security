@@ -152,93 +152,43 @@ class Postfix
 
         // If not caught by hash, check with spam filter
         if (!$skipSpamFilter) {
-            // Check against API server if enabled
-            if ($config['api']['check_spam_against_server'] ?? true) {
-                $logger->info("Starting API spam check...");
-                $logger->info("DEBUG: About to create ApiClient instance");
-                try {
-                    $logger->info("DEBUG: Creating ApiClient with config");
-                    $logger->info("DEBUG: API Email: " . ($config['api']['credentials']['email'] ?? 'NOT SET'));
-                    $logger->info("DEBUG: API Password: " . (empty($config['api']['credentials']['password']) ? 'NOT SET' : 'SET'));
+            // Check LOCAL spam filter FIRST
+            $logger->info("Running local spam filter check first...");
+            $isSpam = $spamFilter->isSpam($headers, $body);
+            if ($isSpam) {
+                $spamReason = $spamFilter->getLastSpamReason() ?? 'Local spam filter detection';
+                $logger->info("Local spam filter flagged email: {$spamReason}");
+            } else {
+                $logger->info("Local spam filter: email is clean");
 
+                // Only check API if local filter didn't detect spam
+                if ($config['api']['check_spam_against_server'] ?? true) {
+                    $logger->info("No local spam detected, checking with API...");
+                    $logger->info("DEBUG: About to create ApiClient instance");
                     try {
-                        $apiClient = new \Cyford\Security\Classes\ApiClient($config, $logger);
-                        $logger->info("DEBUG: ApiClient created successfully");
-                    } catch (Exception $e) {
-                        $logger->error("ERROR: Failed to create ApiClient: " . $e->getMessage());
-                        throw $e;
-                    }
-                    $logger->info("DEBUG: About to call login()");
-                    try {
-                        $apiClient->login();
-                        $logger->info("DEBUG: Login completed successfully");
-                    } catch (Exception $e) {
-                        $logger->error("ERROR: Login failed: " . $e->getMessage());
-                        throw $e;
-                    }
+                        $logger->info("DEBUG: Creating ApiClient with config");
+                        $logger->info("DEBUG: API Email: " . ($config['api']['credentials']['email'] ?? 'NOT SET'));
+                        $logger->info("DEBUG: API Password: " . (empty($config['api']['credentials']['password']) ? 'NOT SET' : 'SET'));
 
-                    $logger->info("DEBUG: Checking config values...");
-                    $logger->info("DEBUG: api.spam_threshold = " . ($config['api']['spam_threshold'] ?? 'NOT SET'));
-                    $logger->info("DEBUG: postfix.spam_handling.threshold = " . ($config['postfix']['spam_handling']['threshold'] ?? 'NOT SET'));
-
-                    $threshold = $config['api']['spam_threshold'] ?? $config['postfix']['spam_handling']['threshold'] ?? 70;
-                    $logger->info("API spam check - threshold: {$threshold}, from: " . ($headers['From'] ?? 'unknown'));
-
-                    // Extract clean email address from From header
-                    $fromEmail = $headers['From'] ?? '';
-                    if (preg_match('/<([^>]+)>/', $fromEmail, $matches)) {
-                        $fromEmail = $matches[1]; // Extract email from <email@domain.com>
-                    } elseif (preg_match('/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/', $fromEmail, $matches)) {
-                        $fromEmail = $matches[1]; // Extract email with regex
-                    }
-
-                    $apiResult = $apiClient->analyzeSpam(
-                        $fromEmail,
-                        $body,
-                        $headers,
-                        [
-                            'threshold' => $threshold,
-                            'hostname' => gethostname()
-                        ]
-                    );
-
-                    $logger->info("API response status: " . $apiResult['status_code']);
-                    $logger->info("API response data: " . json_encode($apiResult['response'] ?? []));
-
-                    if ($apiResult['status_code'] === 200 && isset($apiResult['response']['data']['spam_analysis'])) {
-                        $spamAnalysis = $apiResult['response']['data']['spam_analysis'];
-                        $isSpam = $spamAnalysis['is_spam'] ?? false;
-                        $spamScore = $spamAnalysis['spam_score'] ?? 0;
-                        $logger->info("API spam analysis - is_spam: " . ($isSpam ? 'true' : 'false') . ", score: {$spamScore}");
-
-                        if ($isSpam) {
-                            $spamReason = 'API spam detection: ' . implode(', ', $spamAnalysis['factors'] ?? []);
-                            $logger->warning("Email flagged as spam by API: {$spamReason}");
+                        try {
+                            $apiClient = new \Cyford\Security\Classes\ApiClient($config, $logger);
+                            $logger->info("DEBUG: ApiClient created successfully");
+                        } catch (Exception $e) {
+                            $logger->error("ERROR: Failed to create ApiClient: " . $e->getMessage());
+                            throw $e;
                         }
-                    }
-                } catch (Exception $e) {
-                    $logger->warning("API spam check failed: " . $e->getMessage());
-                }
-            }
+                        $logger->info("DEBUG: About to call login()");
+                        try {
+                            $apiClient->login();
+                            $logger->info("DEBUG: Login completed successfully");
+                        } catch (Exception $e) {
+                            $logger->error("ERROR: Login failed: " . $e->getMessage());
+                            throw $e;
+                        }
 
-            // Fallback to local spam filter if API didn't detect spam
-            if (!$isSpam) {
-                $isSpam = $spamFilter->isSpam($headers, $body);
-                if ($isSpam) {
-                    $spamReason = $spamFilter->getLastSpamReason() ?? 'Local spam filter detection';
-                }
-            }
+                        $logger->info("DEBUG: Checking config values...");
+                        $logger
 
-            // Record new hash pattern (spam or clean) for future reference
-            if ($database) {
-                try {
-                    $database->recordEmailHash($subject, $body, $isSpam);
-                    $logger->info("Email hash recorded as " . ($isSpam ? 'spam' : 'clean') . " for future detection");
-                } catch (Exception $e) {
-                    $logger->warning("Failed to record email hash: " . $e->getMessage());
-                }
-            }
-        }
 
         if ($isSpam) {
             $logger->warning("Email flagged as spam. Reason: {$spamReason}");
