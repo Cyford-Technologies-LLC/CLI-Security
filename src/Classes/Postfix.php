@@ -101,7 +101,7 @@ class Postfix
             $logger->error("Recipient not found or invalid in email headers.");
             throw new RuntimeException("Recipient not found or invalid in email headers.");
         }
-        $logger->info("Recipient resolved: {$recipient}");
+        $logger->info("Recipient resolved: $recipient");
 
         $subject = $headers['Subject'] ?? '';
         $isSpam = false;
@@ -187,7 +187,7 @@ class Postfix
                     ];
                     $logger->info("Reporting spam to server - from: " . ($headers['From'] ?? 'unknown'));
 
-                    $reportResult = $apiClient->reportSpam($reportData);
+                    $reportResult = $apiClient->analyzeSpam($headers['From'] ?? '', $body, $headers);
                     $logger->info("Spam report response: " . json_encode($reportResult, JSON_THROW_ON_ERROR));
                     $logger->info("Spam reported to server successfully");
                 } catch (Exception $e) {
@@ -214,7 +214,7 @@ class Postfix
                 return;
             }
 
-            $logger->info("Using standard spam handling method: {$spamHandlingMethod}");
+            $logger->info("Using standard spam handling method: $spamHandlingMethod");
             $this->handleSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
             return;
         }
@@ -487,7 +487,7 @@ EOF;
             $emailData = "X-Processed-By-Security-Filter: true\r\n" . $emailData;
         }
 
-        $logger->info("Requeueing email using method: {$requeueMethod} for recipient: {$recipient}");
+        $logger->info("Requeueing email using method: $requeueMethod for recipient: $recipient");
 
         switch ($requeueMethod) {
             case 'sendmail':
@@ -519,7 +519,7 @@ EOF;
     {
         $sendmailPath = '/usr/sbin/sendmail';
         $requeueCommand = "{$sendmailPath} -i -- {$recipient}";
-        $logger->info("Executing sendmail command: {$requeueCommand}");
+        $logger->info("Executing sendmail command: $requeueCommand");
 
         $process = proc_open($requeueCommand, [
             ['pipe', 'r'],
@@ -539,7 +539,7 @@ EOF;
             $returnCode = proc_close($process);
 
             if ($returnCode !== 0) {
-                throw new RuntimeException("sendmail failed. Exit code: {$returnCode}. Errors: {$errors}");
+                throw new RuntimeException("sendmail failed. Exit code: $returnCode. Errors: $errors");
             }
 
             $logger->info("Email successfully requeued with sendmail");
@@ -556,7 +556,7 @@ EOF;
         $smtpHost = '127.0.0.1';
         $smtpPort = 25;
         
-        $logger->info("Connecting to SMTP server at {$smtpHost}:{$smtpPort}");
+        $logger->info("Connecting to SMTP server at $smtpHost:$smtpPort");
         
         $socket = fsockopen($smtpHost, $smtpPort, $errno, $errstr, 30);
         if (!$socket) {
@@ -567,35 +567,35 @@ EOF;
             // Read greeting
             $response = fgets($socket);
             if (!str_starts_with($response, '220')) {
-                throw new RuntimeException("SMTP server error: {$response}");
+                throw new RuntimeException("SMTP server error: $response");
             }
             
             // HELO
             fwrite($socket, "HELO localhost\r\n");
             $response = fgets($socket);
             if (!str_starts_with($response, '250')) {
-                throw new RuntimeException("HELO failed: {$response}");
+                throw new RuntimeException("HELO failed: $response");
             }
             
             // MAIL FROM
             fwrite($socket, "MAIL FROM:<>\r\n");
             $response = fgets($socket);
             if (!str_starts_with($response, '250')) {
-                throw new RuntimeException("MAIL FROM failed: {$response}");
+                throw new RuntimeException("MAIL FROM failed: $response");
             }
             
             // RCPT TO
             fwrite($socket, "RCPT TO:<{$recipient}>\r\n");
             $response = fgets($socket);
             if (!str_starts_with($response, '250')) {
-                throw new RuntimeException("RCPT TO failed: {$response}");
+                throw new RuntimeException("RCPT TO failed: $response");
             }
             
             // DATA
             fwrite($socket, "DATA\r\n");
             $response = fgets($socket);
             if (!str_starts_with($response, '354')) {
-                throw new RuntimeException("DATA failed: {$response}");
+                throw new RuntimeException("DATA failed: $response");
             }
             
             // Send email data
@@ -607,7 +607,7 @@ EOF;
             
             $response = fgets($socket);
             if (!str_starts_with($response, '250')) {
-                throw new RuntimeException("Email delivery failed: {$response}");
+                throw new RuntimeException("Email delivery failed: $response");
             }
             
             // QUIT
@@ -639,7 +639,7 @@ EOF;
             $result = shell_exec($command . ' 2>&1');
             
             if ($result !== null && trim($result) !== '') {
-                throw new RuntimeException("Postdrop failed: {$result}");
+                throw new RuntimeException("Postdrop failed: $result");
             }
             
             $logger->info("Email successfully queued via postdrop");
@@ -672,13 +672,13 @@ EOF;
             exec($moveCmd, $output, $returnCode);
             
             if ($returnCode !== 0) {
-                throw new RuntimeException("Move failed with return code: {$returnCode}");
+                throw new RuntimeException("Move failed with return code: $returnCode");
             }
             
             exec("sudo chown postfix:postdrop {$finalFile}");
             exec("sudo chmod 644 {$finalFile}");
             
-            $logger->info("Email successfully queued via pickup directory: {$queueId}");
+            $logger->info("Email successfully queued via pickup directory: $queueId");
             
         } finally {
             if (file_exists($tempFile)) {
@@ -717,7 +717,7 @@ EOF;
                 break;
                 
             default:
-                $logger->warning("Unknown spam action: {$spamAction}. Adding spam headers.");
+                $logger->warning("Unknown spam action: $spamAction. Adding spam headers.");
                 $emailData = $this->addSpamHeaders($emailData, $spamReason, $logger);
                 $this->requeueEmail($emailData, $recipient, $logger);
         }
@@ -732,12 +732,12 @@ EOF;
         $bounceMessage = $config['postfix']['spam_handling']['bounce_message'] ?? 'Message rejected due to spam content.';
         $from = $headers['From'] ?? 'unknown';
         
-        $logger->info("Bouncing spam email from: {$from}");
+        $logger->info("Bouncing spam email from: $from");
         
         // Extract sender email from From header
         $senderEmail = $this->extractEmailAddress($from);
         if (empty($senderEmail)) {
-            $logger->warning("Cannot bounce - invalid sender email: {$from}");
+            $logger->warning("Cannot bounce - invalid sender email: $from");
             return;
         }
         
@@ -747,7 +747,7 @@ EOF;
         // Use Postfix's requeue method (which uses smart host) instead of direct sendmail
         try {
             $this->requeueEmail($bounceEmail, $senderEmail, $logger);
-            $logger->info("Bounce message sent via smart host to: {$senderEmail}");
+            $logger->info("Bounce message sent via smart host to: $senderEmail");
         } catch (Exception $e) {
             $logger->error("Failed to send bounce via smart host: " . $e->getMessage());
         }
@@ -761,17 +761,17 @@ EOF;
         global $config;
         $spamFolder = $config['postfix']['spam_handling']['quarantine_folder'] ?? 'Spam';
         
-        $logger->info("Quarantining spam email to {$spamFolder} folder for {$recipient}");
+        $logger->info("Quarantining spam email to $spamFolder folder for $recipient");
         
         // Resolve alias to real user
         $realUser = $this->resolveEmailAlias($recipient, $logger);
         if (!$realUser) {
-            $logger->error("Could not resolve recipient {$recipient} to a real user. Rejecting email.");
+            $logger->error("Could not resolve recipient $recipient to a real user. Rejecting email.");
             $this->bounceSpamEmail([], $logger);
             return;
         }
         
-        $logger->info("Resolved {$recipient} to real user: {$realUser}");
+        $logger->info("Resolved $recipient to real user: $realUser");
         
         // Get quarantine method from config
         global $config;
@@ -783,12 +783,12 @@ EOF;
             $userMaildir = str_replace('{user}', $realUser, $maildirTemplate);
             
             $logger->info("Quarantine method: user_maildir");
-            $logger->info("Real user: {$realUser}, User maildir: {$userMaildir}");
+            $logger->info("Real user: $realUser, User maildir: $userMaildir");
             
             // Check if user maildir exists
             if (!is_dir($userMaildir)) {
-                $logger->error("User maildir does not exist: {$userMaildir}");
-                throw new \RuntimeException("User maildir does not exist: {$userMaildir}");
+                $logger->error("User maildir does not exist: $userMaildir");
+                throw new \RuntimeException("User maildir does not exist: $userMaildir");
             }
             
             // Detect existing spam folders (common names)
@@ -806,7 +806,7 @@ EOF;
                 $candidatePath = $userMaildir . '/' . $candidate;
                 if (is_dir($candidatePath)) {
                     $maildirPath = $candidatePath;
-                    $logger->info("Found existing spam folder: {$maildirPath}");
+                    $logger->info("Found existing spam folder: $maildirPath");
                     break;
                 }
             }
@@ -814,21 +814,21 @@ EOF;
             // If no existing spam folder found, create default one
             if (!$maildirPath) {
                 $defaultSpamFolder = $config['postfix']['spam_handling']['quarantine_folder'] ?? 'Spam';
-                $maildirPath = "{$userMaildir}/.{$defaultSpamFolder}";
+                $maildirPath = "$userMaildir/.{$defaultSpamFolder}";
                 
-                $logger->info("No existing spam folder found, creating: {$maildirPath}");
+                $logger->info("No existing spam folder found, creating: $maildirPath");
                 
                 // Create directories directly (no sudo in chroot)
                 $success = true;
-                $success = !mkdir($maildirPath, 0775, true) && !is_dir($maildirPath);
-                $success = $success && !mkdir($concurrentDirectory = $maildirPath . '/cur', 0775, true) && !is_dir($concurrentDirectory);
-                $success = $success && !mkdir($concurrentDirectory = $maildirPath . '/new', 0775, true) && !is_dir($concurrentDirectory);
-                $success = $success && !mkdir($concurrentDirectory = $maildirPath . '/tmp', 0775, true) && !is_dir($concurrentDirectory);
-                
+                $success = $success && (mkdir($maildirPath, 0775, true) || is_dir($maildirPath));
+                $success = $success && (mkdir($maildirPath . '/cur', 0775, true) || is_dir($maildirPath . '/cur'));
+                $success = $success && (mkdir($maildirPath . '/new', 0775, true) || is_dir($maildirPath . '/new'));
+                $success = $success && (mkdir($maildirPath . '/tmp', 0775, true) || is_dir($maildirPath . '/tmp'));
+
                 if ($success) {
-                    $logger->info("Created spam folder: {$maildirPath}");
+                    $logger->info("Created spam folder: $maildirPath");
                 } else {
-                    $logger->error("Failed to create spam folder: {$maildirPath}");
+                    $logger->error("Failed to create spam folder: $maildirPath");
                     throw new \RuntimeException("Quarantine failed - cannot create spam folder");
                 }
             }
@@ -843,10 +843,10 @@ EOF;
             // Create spam storage if it doesn't exist
             if (!is_dir($userSpamPath)) {
                 if (!mkdir($userSpamPath, 0755, true) && !is_dir($userSpamPath)) {
-                    $logger->error("Failed to create system quarantine folder: {$userSpamPath}");
+                    $logger->error("Failed to create system quarantine folder: $userSpamPath");
                     throw new \RuntimeException("Quarantine failed - cannot create spam folder");
                 }
-                $logger->info("Created system quarantine folder: {$userSpamPath}");
+                $logger->info("Created system quarantine folder: $userSpamPath");
             }
             $spamFile = $userSpamPath . '/';
         }
@@ -856,7 +856,7 @@ EOF;
         $fullSpamFile = $spamFile . $filename;
         
         if (file_put_contents($fullSpamFile, $emailData)) {
-            $logger->info("Spam email quarantined to: {$fullSpamFile} (method: {$quarantineMethod})");
+            $logger->info("Spam email quarantined to: $fullSpamFile (method: $quarantineMethod)");
         } else {
             $logger->error("Failed to quarantine spam email. Rejecting instead.");
             throw new \RuntimeException("Quarantine failed");
@@ -878,11 +878,11 @@ EOF;
         // Use cached alias mapping
         $realUser = $this->systems->getAliasMapping($email);
         if ($realUser) {
-            $logger->info("Found cached alias mapping: {$email} -> {$realUser}");
+            $logger->info("Found cached alias mapping: $email -> $realUser");
             return $realUser;
         }
         
-        $logger->warning("Could not resolve alias {$email} to a real user");
+        $logger->warning("Could not resolve alias $email to a real user");
         return null;
     }
 
@@ -900,11 +900,11 @@ EOF;
         // Create X-Spam headers (SpamAssassin compatible)
         $spamHeaders = "X-Spam-Flag: YES\r\n";
         $spamHeaders .= "X-Spam-Checker-Version: Cyford Web Armor 1.0\r\n";
-        $spamHeaders .= "X-Spam-Level: {$spamLevel}\r\n";
-        $spamHeaders .= "X-Spam-Score: {$spamScore}\r\n";
-        $spamHeaders .= "X-Spam-Status: Yes, score={$spamScore} required=5.0 tests=CYFORD_SPAM\r\n";
+        $spamHeaders .= "X-Spam-Level: $spamLevel\r\n";
+        $spamHeaders .= "X-Spam-Score: $spamScore\r\n";
+        $spamHeaders .= "X-Spam-Status: Yes, score=$spamScore required=5.0 tests=CYFORD_SPAM\r\n";
         $spamHeaders .= "X-Spam-Subject: ***SPAM*** \r\n";
-        $spamHeaders .= "X-Spam-Report: {$spamReason}\r\n";
+        $spamHeaders .= "X-Spam-Report: $spamReason\r\n";
         
         // Add headers after existing headers
         if (preg_match('/(.*?\r?\n\r?\n)(.*)/s', $emailData, $matches)) {
@@ -1019,9 +1019,9 @@ EOF;
         
         // Append to spam log file
         if (file_put_contents($spamLogFile, $logEntry, FILE_APPEND | LOCK_EX) === false) {
-            $logger->error("Failed to write to spam log file: {$spamLogFile}");
+            $logger->error("Failed to write to spam log file: $spamLogFile");
         } else {
-            $logger->info("Spam email logged to: {$spamLogFile}");
+            $logger->info("Spam email logged to: $spamLogFile");
         }
     }
 
@@ -1066,18 +1066,18 @@ EOF;
 
         // Check if directory is writable
         if (!is_writable($backupDir)) {
-            echo "WARNING: Cannot write to {$backupDir}, using /tmp for backup\n";
+            echo "WARNING: Cannot write to $backupDir, using /tmp for backup\n";
             $backupDir = '/tmp';
             $backupFile = "{$backupDir}/" . basename($filePath) . ".backup_{$timestamp}";
         }
 
         // Create the backup
         if (!copy($filePath, $backupFile)) {
-            echo "WARNING: Failed to create backup for: {$filePath}. Continuing without backup.\n";
+            echo "WARNING: Failed to create backup for: $filePath. Continuing without backup.\n";
             return;
         }
 
-        echo "Backup created: {$backupFile}\n";
+        echo "Backup created: $backupFile\n";
     }
 
     /**
@@ -1154,7 +1154,7 @@ EOF;
                 break;
                 
             default:
-                $logger->warning("Unknown error handling action: {$onSystemError}, defaulting to pass");
+                $logger->warning("Unknown error handling action: $onSystemError, defaulting to pass");
                 $this->requeueEmail($emailData, $recipient, $logger);
         }
     }
@@ -1168,10 +1168,10 @@ EOF;
         $errorLogFile = $config['postfix']['error_handling']['error_log_file'] ?? '/var/log/cyford-security/system-errors.log';
         
         $timestamp = date('Y-m-d H:i:s');
-        $errorEntry = "[{$timestamp}] ATTEMPT {$attempt}: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine() . "\n";
+        $errorEntry = "[$timestamp] ATTEMPT $attempt: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine() . "\n";
         
         file_put_contents($errorLogFile, $errorEntry, FILE_APPEND | LOCK_EX);
-        $logger->error("System error (attempt {$attempt}): " . $e->getMessage());
+        $logger->error("System error (attempt $attempt): " . $e->getMessage());
     }
     
     /**
@@ -1199,7 +1199,7 @@ EOF;
         $subject = $headers['Subject'] ?? 'No Subject';
         
         $bounceMessage = "Your email could not be processed due to a system error.\n\n";
-        $bounceMessage .= "Error: {$errorMessage}\n\n";
+        $bounceMessage .= "Error: $errorMessage\n\n";
         $bounceMessage .= "Please try again later or contact the administrator.";
         
         $bounceEmail = $this->createBounceMessage($headers, $bounceMessage);
@@ -1211,7 +1211,7 @@ EOF;
         shell_exec($command);
         
         unlink($tempFile);
-        $logger->info("System error bounce sent to: {$from}");
+        $logger->info("System error bounce sent to: $from");
     }
     
     /**
@@ -1221,7 +1221,7 @@ EOF;
     {
         $realUser = $this->resolveEmailAlias($recipient, $logger);
         if (!$realUser) {
-            $logger->error("Cannot quarantine - could not resolve recipient {$recipient}");
+            $logger->error("Cannot quarantine - could not resolve recipient $recipient");
             return;
         }
         
@@ -1246,11 +1246,11 @@ EOF;
         $errorFile = $quarantineFolder . '/new/' . $filename;
         
         // Add error information to email
-        $errorHeader = "X-System-Error: {$errorMessage}\r\n";
+        $errorHeader = "X-System-Error: $errorMessage\r\n";
         $emailData = $errorHeader . $emailData;
         
         if (file_put_contents($errorFile, $emailData)) {
-            $logger->info("Email quarantined due to system error: {$errorFile}");
+            $logger->info("Email quarantined due to system error: $errorFile");
         } else {
             $logger->error("Failed to quarantine email with system error");
         }
@@ -1281,7 +1281,7 @@ EOF;
         $username = explode('@', $recipient)[0];
         
         $command = "{$ldaPath} -d {$username} -f ''";
-        $logger->info("Executing dovecot-lda command: {$command}");
+        $logger->info("Executing dovecot-lda command: $command");
         
         $process = proc_open($command, [
             ['pipe', 'r'],
@@ -1301,7 +1301,7 @@ EOF;
             $returnCode = proc_close($process);
             
             if ($returnCode !== 0) {
-                throw new RuntimeException("dovecot-lda failed. Exit code: {$returnCode}. Errors: {$errors}");
+                throw new RuntimeException("dovecot-lda failed. Exit code: $returnCode. Errors: $errors");
             }
             
             $logger->info("Email successfully delivered via dovecot-lda");
@@ -1318,17 +1318,17 @@ EOF;
         global $config;
         
         $logger->info("=== SPAM MAILDIR DELIVERY VIA TASK QUEUE ===");
-        $logger->info("Recipient: {$recipient}");
+        $logger->info("Recipient: $recipient");
         
         $username = strstr($recipient, '@', true);
-        $logger->info("Extracted username: {$username}");
+        $logger->info("Extracted username: $username");
         
         $maildirPath = str_replace('{user}', $username, $config['postfix']['spam_handling']['maildir_path']);
         $spamDir = $maildirPath . '/.' . $config['postfix']['spam_handling']['quarantine_folder'];
         $filename = time() . '.' . getmypid() . '.spam';
         $targetPath = $spamDir . '/new/' . $filename;
         
-        $logger->info("Target path: {$targetPath}");
+        $logger->info("Target path: $targetPath");
         $logger->info("Email size: " . strlen($emailData) . " bytes");
         
         try {
@@ -1342,7 +1342,7 @@ EOF;
                 'spam_dir' => $spamDir
             ]);
             
-            $logger->info("✅ SUCCESS: Spam task added to queue: {$taskId}");
+            $logger->info("✅ SUCCESS: Spam task added to queue: $taskId");
             $logger->info("Task will be processed by root cron job within 1 minute");
             $logger->info("=== SPAM MAILDIR DELIVERY QUEUED ===");
             exit(0);

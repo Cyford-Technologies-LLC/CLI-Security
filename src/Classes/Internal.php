@@ -1,6 +1,8 @@
 <?php
 namespace Cyford\Security\Classes;
 
+use Exception;
+
 class Internal
 {
     private array $config;
@@ -219,10 +221,10 @@ class Internal
             echo str_repeat("-", 80) . "\n";
             
             foreach ($patterns as $pattern) {
-                echo "ID: {$pattern['id']}\n";
-                echo "Subject: {$pattern['sample_subject']}\n";
+                echo "ID: " . $pattern['id'] . "\n";
+                echo "Subject: " . $pattern['sample_subject'] . "\n";
                 echo "Body Preview: " . substr($pattern['sample_body_preview'], 0, 100) . "...\n";
-                echo "Count: {$pattern['count']} | First: {$pattern['first_seen']} | Last: {$pattern['last_seen']}\n";
+                echo "Count: " . $pattern['count'] . " | First: " . $pattern['first_seen'] . " | Last: " . $pattern['last_seen'] . "\n";
                 echo str_repeat("-", 80) . "\n";
             }
             
@@ -275,7 +277,7 @@ class Internal
             $emailStats = $database->getSpamStats(7);
             echo "📈 Email Statistics (Last 7 Days):\n";
             foreach ($emailStats as $stat) {
-                echo "  {$stat['date']}: Total={$stat['total_emails']}, Spam={$stat['spam_emails']}, Clean={$stat['clean_emails']}\n";
+                echo "  " . $stat['date'] . ": Total=" . $stat['total_emails'] . ", Spam=" . $stat['spam_emails'] . ", Clean=" . $stat['clean_emails'] . "\n";
             }
             
         } catch (\Exception $e) {
@@ -332,13 +334,13 @@ class Internal
             }
             
             foreach ($algorithms as $algo) {
-                echo "ID: {$algo['id']} | Server ID: " . ($algo['server_id'] ?? 'N/A') . "\n";
-                echo "Name: {$algo['name']}\n";
-                echo "Category: {$algo['threat_category']} | Type: {$algo['detection_type']}\n";
-                echo "Target: {$algo['target']} | Score: {$algo['score']}\n";
+                echo "ID: " . $algo['id'] . " | Server ID: " . ($algo['server_id'] ?? 'N/A') . "\n";
+                echo "Name: " . $algo['name'] . "\n";
+                echo "Category: " . $algo['threat_category'] . " | Type: " . $algo['detection_type'] . "\n";
+                echo "Target: " . $algo['target'] . " | Score: " . $algo['score'] . "\n";
                 echo "Pattern: " . substr($algo['pattern'], 0, 60) . "...\n";
-                echo "Enabled: " . ($algo['enabled'] ? 'Yes' : 'No') . " | Priority: {$algo['priority']}\n";
-                echo "Created: {$algo['created_at']} | Updated: {$algo['updated_at']}\n";
+                echo "Enabled: " . ($algo['enabled'] ? 'Yes' : 'No') . " | Priority: " . $algo['priority'] . "\n";
+                echo "Created: " . $algo['created_at'] . " | Updated: " . $algo['updated_at'] . "\n";
                 echo str_repeat("-", 80) . "\n";
             }
             
@@ -493,7 +495,7 @@ class Internal
                 $database->syncDetectionAlgorithm($algo);
                 $migrated++;
             } catch (\Exception $e) {
-                echo "⚠️ Failed to migrate '{$algo['name']}': " . $e->getMessage() . "\n";
+                echo "⚠️ Failed to migrate '" . $algo['name'] . "': " . $e->getMessage() . "\n";
             }
         }
         
@@ -629,7 +631,7 @@ class Internal
             $sudoersFile = '/etc/sudoers.d/cyford-security';
             if (file_put_contents($sudoersFile, $sudoersContent)) {
                 exec("chmod 440 {$sudoersFile}");
-                echo "✅ Sudoers rule created: {$sudoersFile}\n";
+                echo "✅ Sudoers rule created: $sudoersFile\n";
             } else {
                 echo "❌ Failed to create sudoers rule\n";
             }
@@ -643,11 +645,13 @@ class Internal
             
             foreach ($logDirs as $dir) {
                 if (!is_dir($dir)) {
-                    mkdir($dir, 0755, true);
+                    if (!mkdir($dir, 0755, true) && !is_dir($dir)) {
+                        throw new \RuntimeException(sprintf('Directory "%s" was not created', $dir));
+                    }
                 }
                 exec("chown -R report-ip:report-ip {$dir}");
                 exec("chmod -R 755 {$dir}");
-                echo "✅ Log directory: {$dir}\n";
+                echo "✅ Log directory: $dir\n";
             }
             
             // 3. Setup database directory
@@ -656,18 +660,20 @@ class Internal
             $dbDir = dirname($dbPath);
             
             if (!is_dir($dbDir)) {
-                mkdir($dbDir, 0755, true);
+                if (!mkdir($dbDir, 0755, true) && !is_dir($dbDir)) {
+                    throw new \RuntimeException(sprintf('Directory "%s" was not created', $dbDir));
+                }
             }
             
             if (file_exists($dbPath)) {
                 exec("chown postfix:postfix {$dbPath}");
                 exec("chmod 664 {$dbPath}");
-                echo "✅ Database permissions: {$dbPath}\n";
+                echo "✅ Database permissions: $dbPath\n";
             }
             
             exec("chown postfix:postfix {$dbDir}");
             exec("chmod 755 {$dbDir}");
-            echo "✅ Database directory: {$dbDir}\n";
+            echo "✅ Database directory: $dbDir\n";
             
             // 4. Setup list files
             echo "📋 Setting up list files...\n";
@@ -683,7 +689,9 @@ class Internal
             foreach ($listFiles as $file) {
                 $dir = dirname($file);
                 if (!is_dir($dir)) {
-                    mkdir($dir, 0755, true);
+                    if (!mkdir($dir, 0755, true) && !is_dir($dir)) {
+                        throw new \RuntimeException(sprintf('Directory "%s" was not created', $dir));
+                    }
                 }
                 
                 if (!file_exists($file)) {
@@ -692,7 +700,7 @@ class Internal
                 
                 exec("chown report-ip:report-ip {$file}");
                 exec("chmod 644 {$file}");
-                echo "✅ List file: {$file}\n";
+                echo "✅ List file: $file\n";
             }
             
             // 5. Setup project directory
@@ -703,13 +711,15 @@ class Internal
             exec("find {$projectDir} -type f -exec chmod 664 {} \;");
             // Ensure tasks.json is group writable
             exec("chmod 664 {$projectDir}/tasks.json 2>/dev/null");
-            echo "✅ Project directory: {$projectDir} (group writable)\n";
+            echo "✅ Project directory: $projectDir (group writable)\n";
             
             // 6. Setup task queue permissions
             echo "📋 Setting up task queue permissions...\n";
             $queueDir = '/var/spool/cyford-security';
             if (!is_dir($queueDir)) {
-                mkdir($queueDir, 0755, true);
+                if (!mkdir($queueDir, 0755, true) && !is_dir($queueDir)) {
+                    throw new \RuntimeException(sprintf('Directory "%s" was not created', $queueDir));
+                }
             }
             exec("chown root:postfix {$queueDir}");
             exec("chmod 775 {$queueDir}");
@@ -720,7 +730,7 @@ class Internal
             }
             exec("chown root:postfix {$tasksFile}");
             exec("chmod 664 {$tasksFile}");
-            echo "✅ Task queue permissions: {$queueDir}\n";
+            echo "✅ Task queue permissions: $queueDir\n";
             
             echo "\n🎉 Permission setup completed successfully!\n";
             echo "\n📋 Summary:\n";
@@ -784,21 +794,21 @@ class Internal
             return;
         }
         
-        echo "👤 Creating mail user: {$username}\n";
+        echo "👤 Creating mail user: $username\n";
         
         try {
             // 1. Create system user
             $userExists = exec("id {$username} 2>/dev/null");
             if (empty($userExists)) {
                 exec("useradd -m -s /bin/bash {$username}");
-                echo "✅ System user created: {$username}\n";
+                echo "✅ System user created: $username\n";
             } else {
-                echo "ℹ️  System user already exists: {$username}\n";
+                echo "ℹ️  System user already exists: $username\n";
             }
             
             // 2. Set password
             exec("echo '{$username}:{$password}' | chpasswd");
-            echo "✅ Password set for user: {$username}\n";
+            echo "✅ Password set for user: $username\n";
             
             // 3. Create maildir structure
             $maildirTemplate = $this->config['postfix']['spam_handling']['maildir_path'] ?? '/home/{user}/Maildir';
@@ -817,12 +827,14 @@ class Internal
             
             foreach ($maildirDirs as $dir) {
                 if (!is_dir($dir)) {
-                    mkdir($dir, 0755, true);
+                    if (!mkdir($dir, 0755, true) && !is_dir($dir)) {
+                        throw new \RuntimeException(sprintf('Directory "%s" was not created', $dir));
+                    }
                 }
             }
             
             exec("chown -R {$username}:{$username} {$maildir}");
-            echo "✅ Maildir created: {$maildir}\n";
+            echo "✅ Maildir created: $maildir\n";
             
             // 4. Add to Postfix virtual users (if using virtual domains)
             $domain = gethostname() ?: 'localhost';
@@ -852,9 +864,9 @@ class Internal
             
             echo "\n🎉 User created successfully!\n";
             echo "\n📧 Email Details:\n";
-            echo "  Email: {$username}@{$domain}\n";
-            echo "  Password: {$password}\n";
-            echo "  Maildir: {$maildir}\n";
+            echo "  Email: $username@$domain\n";
+            echo "  Password: $password\n";
+            echo "  Maildir: $maildir\n";
             echo "\n🌐 Access via SquirrelMail or IMAP client\n";
             
         } catch (Exception $e) {
@@ -1058,7 +1070,7 @@ EOF;
             return;
         }
         
-        echo "🔧 Setting up user directory permissions for: {$username}\n";
+        echo "🔧 Setting up user directory permissions for: $username\n";
         
         try {
             $this->setupSingleUserPermissions($username);
@@ -1117,14 +1129,14 @@ EOF;
         $failCount = 0;
         
         foreach ($users as $username) {
-            echo "🔧 Processing user: {$username}\n";
+            echo "🔧 Processing user: $username\n";
             
             try {
                 $this->setupSingleUserPermissions($username);
-                echo "✅ {$username}: SUCCESS\n";
+                echo "✅ $username: SUCCESS\n";
                 $successCount++;
             } catch (Exception $e) {
-                echo "❌ {$username}: FAILED - " . $e->getMessage() . "\n";
+                echo "❌ $username: FAILED - " . $e->getMessage() . "\n";
                 $failCount++;
             }
             
@@ -1152,16 +1164,16 @@ EOF;
         // Add postfix and report-ip users to user's group
         exec("usermod -a -G {$username} postfix 2>&1", $output, $returnCode);
         if ($returnCode === 0) {
-            echo "  ✅ Added postfix user to {$username} group\n";
+            echo "  ✅ Added postfix user to $username group\n";
         } else {
-            echo "  ❌ Failed to add postfix to {$username} group: " . implode(' ', $output) . "\n";
+            echo "  ❌ Failed to add postfix to $username group: " . implode(' ', $output) . "\n";
         }
         
         exec("usermod -a -G {$username} report-ip 2>&1", $output2, $returnCode2);
         if ($returnCode2 === 0) {
-            echo "  ✅ Added report-ip user to {$username} group\n";
+            echo "  ✅ Added report-ip user to $username group\n";
         } else {
-            echo "  ❌ Failed to add report-ip to {$username} group: " . implode(' ', $output2) . "\n";
+            echo "  ❌ Failed to add report-ip to $username group: " . implode(' ', $output2) . "\n";
         }
         
         // Verify group memberships
@@ -1172,32 +1184,32 @@ EOF;
         $reportIpGroupsStr = implode(' ', $reportIpGroups);
         
         if (strpos($postfixGroupsStr, $username) !== false) {
-            echo "  ✅ Verified: postfix is in {$username} group\n";
+            echo "  ✅ Verified: postfix is in $username group\n";
         } else {
-            echo "  ❌ Warning: postfix not found in {$username} group\n";
-            echo "  📝 postfix groups: {$postfixGroupsStr}\n";
+            echo "  ❌ Warning: postfix not found in $username group\n";
+            echo "  📝 postfix groups: $postfixGroupsStr\n";
         }
         
         if (strpos($reportIpGroupsStr, $username) !== false) {
-            echo "  ✅ Verified: report-ip is in {$username} group\n";
+            echo "  ✅ Verified: report-ip is in $username group\n";
         } else {
-            echo "  ❌ Warning: report-ip not found in {$username} group\n";
-            echo "  📝 report-ip groups: {$reportIpGroupsStr}\n";
+            echo "  ❌ Warning: report-ip not found in $username group\n";
+            echo "  📝 report-ip groups: $reportIpGroupsStr\n";
         }
         
         // Set group permissions on user's home directory
         if (is_dir("/home/{$username}")) {
             exec("chmod g+rx /home/{$username}");
-            echo "  ✅ Set group read/execute on /home/{$username}\n";
+            echo "  ✅ Set group read/execute on /home/$username\n";
         }
         
         // Set group permissions on maildir - change group to postfix for all subdirectories
         if (is_dir($userMaildir)) {
             exec("chmod -R g+rwx {$userMaildir}");
             exec("find {$userMaildir} -type d -name '.*' -exec chgrp postfix {} \;");
-            echo "  ✅ Set group permissions and changed subdirectory groups to postfix: {$userMaildir}\n";
+            echo "  ✅ Set group permissions and changed subdirectory groups to postfix: $userMaildir\n";
         } else {
-            echo "  ℹ️  Maildir {$userMaildir} doesn't exist yet\n";
+            echo "  ℹ️  Maildir $userMaildir doesn't exist yet\n";
         }
         
         // Detect existing spam folders
@@ -1215,7 +1227,7 @@ EOF;
             $candidatePath = $userMaildir . '/' . $candidate;
             if (is_dir($candidatePath)) {
                 $existingSpamFolder = $candidatePath;
-                echo "  📬 Found existing spam folder: {$candidate}\n";
+                echo "  📬 Found existing spam folder: $candidate\n";
                 break;
             }
         }
@@ -1224,7 +1236,7 @@ EOF;
             // Fix permissions on existing folder - use postfix group
             exec("chown -R {$username}:postfix {$existingSpamFolder}");
             exec("chmod -R g+rwx {$existingSpamFolder}");
-            echo "  ✅ Fixed permissions on existing spam folder (postfix group): {$existingSpamFolder}\n";
+            echo "  ✅ Fixed permissions on existing spam folder (postfix group): $existingSpamFolder\n";
         } else {
             // Create default spam folder using sudo for proper ownership
             $spamFolder = $userMaildir . '/.Spam';
@@ -1248,7 +1260,7 @@ EOF;
                 if ($success) {
                     exec("chgrp -R postfix {$spamFolder}");
                     exec("chmod -R g+rwx {$spamFolder}");
-                    echo "  ✅ Created spam folder with postfix group: {$spamFolder}\n";
+                    echo "  ✅ Created spam folder with postfix group: $spamFolder\n";
                 } else {
                     echo "  ❌ Failed to create spam folder\n";
                 }
@@ -1318,11 +1330,11 @@ EOF;
             return;
         }
         
-        echo "📧 Setting up Sieve spam filtering rules for: {$username}\n";
+        echo "📧 Setting up Sieve spam filtering rules for: $username\n";
         
         try {
             $this->setupSingleUserSieveRules($username);
-            echo "\n🎉 Sieve rules setup completed for {$username}!\n";
+            echo "\n🎉 Sieve rules setup completed for $username!\n";
         } catch (Exception $e) {
             echo "❌ Sieve rules setup failed: " . $e->getMessage() . "\n";
         }
@@ -1386,7 +1398,7 @@ EOF;
         $pluginFound = false;
         foreach ($sievePluginPaths as $pluginPath) {
             if (file_exists($pluginPath)) {
-                echo "✅ Found Sieve plugin: {$pluginPath}\n";
+                echo "✅ Found Sieve plugin: $pluginPath\n";
                 $pluginFound = true;
                 break;
             }
@@ -1398,7 +1410,7 @@ EOF;
             if (!empty($findOutput)) {
                 echo "ℹ️  Found Sieve-related files:\n";
                 foreach ($findOutput as $file) {
-                    echo "    {$file}\n";
+                    echo "    $file\n";
                 }
             }
             echo "⚠️  Sieve plugin may not work properly\n";
@@ -1411,7 +1423,7 @@ EOF;
         if (!empty($dovecotVersion) && !empty($packageVersions)) {
             echo "ℹ️  Dovecot version: " . implode(' ', $dovecotVersion) . "\n";
             foreach ($packageVersions as $pkg) {
-                echo "ℹ️  Package: {$pkg}\n";
+                echo "ℹ️  Package: $pkg\n";
             }
             
             // Check for version mismatch
@@ -1429,8 +1441,8 @@ EOF;
                 if (!empty($doveMatches[1]) && !empty($pigeonMatches[1])) {
                     if ($doveMatches[1] !== $pigeonMatches[1]) {
                         echo "⚠️  WARNING: Version mismatch detected!\n";
-                        echo "    Dovecot: {$doveMatches[1]}\n";
-                        echo "    Pigeonhole: {$pigeonMatches[1]}\n";
+                        echo "    Dovecot: " . $doveMatches[1] . "\n";
+                        echo "    Pigeonhole: " . $pigeonMatches[1] . "\n";
                         echo "    This may cause symbol errors. Consider reinstalling matching versions.\n";
                         
                         // Offer to fix version mismatch
@@ -1485,12 +1497,8 @@ EOF;
             $content = file_get_contents($managesieveConf);
             
             // Uncomment ManageSieve service configuration with proper braces
-            $content = str_replace('#  inet_listener sieve {', '  inet_listener sieve {', $content);
-            $content = str_replace('#    port = 4190', '    port = 4190', $content);
-            $content = str_replace('#  }', '  }', $content);
-            
             // Also enable the protocols line
-            $content = str_replace('#protocols = $protocols sieve', 'protocols = $protocols sieve', $content);
+            $content = str_replace(array('#  inet_listener sieve {', '#    port = 4190', '#  }', '#protocols = $protocols sieve'), array('  inet_listener sieve {', '    port = 4190', '  }', 'protocols = $protocols sieve'), $content);
             
             file_put_contents($managesieveConf, $content);
             echo "✅ Enabled ManageSieve service in 20-managesieve.conf\n";
@@ -1530,7 +1538,7 @@ plugin {
 DOVECOT;
             
             file_put_contents($sieveConfigFile, $sieveConfig);
-            echo "✅ Created Sieve configuration file: {$sieveConfigFile}\n";
+            echo "✅ Created Sieve configuration file: $sieveConfigFile\n";
         } else {
             echo "ℹ️  Sieve configuration already exists\n";
         }
@@ -1575,12 +1583,12 @@ DOVECOT;
             if (file_exists($file)) {
                 $content = file_get_contents($file);
                 if (strpos($content, 'mail_plugins') !== false && strpos($content, 'sieve') !== false) {
-                    echo "⚠️  Found global sieve plugin in {$file}\n";
+                    echo "⚠️  Found global sieve plugin in $file\n";
                     // Remove sieve from global mail_plugins to prevent IMAP loading
                     $content = preg_replace('/mail_plugins\s*=\s*\$mail_plugins\s+sieve/', 'mail_plugins = $mail_plugins', $content);
                     $content = preg_replace('/mail_plugins\s*=\s*sieve/', 'mail_plugins = ', $content);
                     file_put_contents($file, $content);
-                    echo "✅ Removed global sieve plugin from {$file}\n";
+                    echo "✅ Removed global sieve plugin from $file\n";
                 }
             }
         }
@@ -1657,7 +1665,7 @@ DOVECOT;
         $content .= "\n# Dovecot LDA for Sieve filtering\nmailbox_command = {$wrapperScript} \$SENDER \$USER\n";
         
         file_put_contents($mainConfig, $content);
-        echo "✅ Configured Postfix for dovecot-lda: {$ldaPath}\n";
+        echo "✅ Configured Postfix for dovecot-lda: $ldaPath\n";
         
         exec('systemctl reload postfix 2>/dev/null');
         echo "✅ Postfix reloaded\n";
@@ -1672,7 +1680,7 @@ DOVECOT;
         
         $systems = new Systems();
         $osInfo = $systems->getOSInfo();
-        echo "🔍 Detected OS: {$osInfo['os']}\n";
+        echo "🔍 Detected OS: " . $osInfo['os'] . "\n";
         
         $allowModification = $this->config['postfix']['allow_modification'] ?? false;
         if (!$allowModification) {
@@ -1890,7 +1898,7 @@ BASH;
             if (file_exists($ldaPath)) {
                 exec("chgrp mail {$ldaPath}");
                 exec("chmod g+x {$ldaPath}");
-                echo "✅ Set group permissions on {$ldaPath}\n";
+                echo "✅ Set group permissions on $ldaPath\n";
                 break;
             }
         }
@@ -1909,7 +1917,9 @@ BASH;
         // Create and fix log directories
         foreach ($logDirs as $dir) {
             if (!is_dir($dir)) {
-                mkdir($dir, 0775, true);
+                if (!mkdir($dir, 0775, true) && !is_dir($dir)) {
+                    throw new \RuntimeException(sprintf('Directory "%s" was not created', $dir));
+                }
             }
             exec("chown dovecot:mail {$dir}");
             exec("chmod 775 {$dir}");
@@ -1919,7 +1929,9 @@ BASH;
         foreach ($logFiles as $file) {
             $dir = dirname($file);
             if (!is_dir($dir)) {
-                mkdir($dir, 0775, true);
+                if (!mkdir($dir, 0775, true) && !is_dir($dir)) {
+                    throw new \RuntimeException(sprintf('Directory "%s" was not created', $dir));
+                }
                 exec("chown dovecot:mail {$dir}");
             }
             
@@ -1999,14 +2011,14 @@ BASH;
         $failCount = 0;
         
         foreach ($users as $user) {
-            echo "📧 Processing user: {$user}\n";
+            echo "📧 Processing user: $user\n";
             
             try {
                 $this->setupSingleUserSieveRules($user);
-                echo "✅ {$user}: SUCCESS\n";
+                echo "✅ $user: SUCCESS\n";
                 $successCount++;
             } catch (Exception $e) {
-                echo "❌ {$user}: FAILED - " . $e->getMessage() . "\n";
+                echo "❌ $user: FAILED - " . $e->getMessage() . "\n";
                 $failCount++;
             }
             
@@ -2028,13 +2040,13 @@ BASH;
         // Check if user exists
         exec("id {$username} 2>/dev/null", $output, $returnCode);
         if ($returnCode !== 0) {
-            throw new Exception("User {$username} does not exist");
+            throw new Exception("User $username does not exist");
         }
         
         // Get user's home directory
         $homeDir = "/home/{$username}";
         if (!is_dir($homeDir)) {
-            throw new Exception("Home directory {$homeDir} does not exist");
+            throw new Exception("Home directory $homeDir does not exist");
         }
         
         // Create sieve directory if it doesn't exist
@@ -2054,7 +2066,7 @@ BASH;
         if (file_exists($sieveScript)) {
             $existingContent = file_get_contents($sieveScript);
             if (strpos($existingContent, 'X-Spam-Flag') !== false) {
-                echo "  ℹ️  Spam filtering rules already exist in: {$sieveScript}\n";
+                echo "  ℹ️  Spam filtering rules already exist in: $sieveScript\n";
                 return;
             }
         }
@@ -2063,7 +2075,7 @@ BASH;
         file_put_contents($sieveScript, $spamRules);
         exec("chown {$username}:{$username} {$sieveScript}");
         exec("chmod 644 {$sieveScript}");
-        echo "  ✅ Created sieve script: {$sieveScript}\n";
+        echo "  ✅ Created sieve script: $sieveScript\n";
         
         // Create sieve directory for future use
         $sieveDir = "{$homeDir}/sieve";
