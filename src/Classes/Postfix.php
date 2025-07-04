@@ -2,6 +2,7 @@
 namespace Cyford\Security\Classes;
 
 use Exception;
+use InvalidArgumentException;
 use RuntimeException;
 
 class Postfix
@@ -12,65 +13,57 @@ class Postfix
     private string $backupDirectory;
     private bool $allowFileModification;
     private Systems $systems;
+    private array $config;
+    private ?Database $database = null;
+    private ?ApiClient $apiClient = null;
 
     public function __construct(array $config, ?Systems $systems = null)
     {
+        $this->config = $config;
         $this->mainConfigPath = $config['postfix']['main_config'] ?? '/etc/postfix/main.cf';
         $this->masterConfigPath = $config['postfix']['master_config'] ?? '/etc/postfix/master.cf';
         $this->postfixCommand = $config['postfix']['postfix_command'] ?? '/usr/sbin/postfix';
         $this->backupDirectory = $config['postfix']['backup_directory'] ?? '/var/backups/postfix';
         $this->allowFileModification = $config['postfix']['allow_modification'] ?? false;
         $this->systems = $systems ?? new Systems();
+        
+        // Initialize database if hash detection is enabled
+        if ($config['postfix']['spam_handling']['hash_detection'] ?? false) {
+            try {
+                $this->database = new Database($config);
+            } catch (Exception $e) {
+                // Database will remain null if initialization fails
+            }
+        }
+        
+        // ApiClient will be initialized lazily when needed (requires logger)
 
         // Ensure Postfix command exists
         if (!file_exists($this->postfixCommand)) {
-            throw new RuntimeException("Postfix command not found at: {$this->postfixCommand}. Check your configuration.");
+            throw new RuntimeException("Postfix command not found at: $this->postfixCommand. Check your configuration.");
         }
 
         // Ensure the backup directory exists
-        if (!is_dir($this->backupDirectory)) {
-            if (!mkdir($concurrentDirectory = $this->backupDirectory, 0755, true) && !is_dir($concurrentDirectory)) {
-                // Fallback to /tmp if can't create in /var/backups
-                $this->backupDirectory = '/tmp/postfix_backups';
-                if (!is_dir($this->backupDirectory)) {
-                    if (!mkdir($concurrentDirectory = $this->backupDirectory, 0755, true) && !is_dir($concurrentDirectory)) {
-                        throw new \RuntimeException(sprintf('Directory "%s" was not created', $concurrentDirectory));
-                    }
+        if (!is_dir($this->backupDirectory) && !mkdir($concurrentDirectory = $this->backupDirectory, 0755, true) && !is_dir($concurrentDirectory)) {
+            // Fallback to /tmp if can't create in /var/backups
+            $this->backupDirectory = '/tmp/postfix_backups';
+            if (!is_dir($this->backupDirectory)) {
+                if (!mkdir($concurrentDirectory = $this->backupDirectory, 0755, true) && !is_dir($concurrentDirectory)) {
+                    throw new \RuntimeException(sprintf('Directory "%s" was not created', $concurrentDirectory));
                 }
             }
         }
     }
 
-    public function processEmail($spamFilter, $logger): void
+    /**
+     * Get or initialize ApiClient with logger
+     */
+    private function getApiClient($logger): ApiClient
     {
-        global $config;
-        $errorHandling = $config['postfix']['error_handling'] ?? [];
-        $onSystemError = $errorHandling['on_system_error'] ?? 'pass';
-        $maxRetries = $errorHandling['max_retries'] ?? 3;
-        $retryDelay = $errorHandling['retry_delay'] ?? 1;
-        $failSafeMode = $errorHandling['fail_safe_mode'] ?? true;
-
-        $logger->info("Processing email received from Postfix...");
-
-        // Wrap email processing in error handling
-        for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
-            try {
-                $this->processEmailInternal($spamFilter, $logger);
-                return; // Success - exit retry loop
-            } catch (Exception $e) {
-                $this->logSystemError($e, $attempt, $logger);
-
-                if ($attempt < $maxRetries) {
-                    $logger->warning("Attempt {$attempt} failed, retrying in {$retryDelay} seconds...");
-                    sleep($retryDelay);
-                    continue;
-                }
-
-                // All retries exhausted - handle according to config
-                $this->handleSystemError($e, $onSystemError, $failSafeMode, $logger);
-                return;
-            }
+        if ($this->apiClient === null) {
+            $this->apiClient = new ApiClient($this->config, $logger);
         }
+        return $this->apiClient;
     }
 
     /**
@@ -89,8 +82,8 @@ class Postfix
         $logger->info("Raw email data successfully read.");
 
         // Parse headers and body
-        list($headers, $body) = $this->parseEmail($emailData);
-        $logger->info("Parsed headers: " . json_encode($headers));
+        [$headers, $body] = $this->parseEmail($emailData);
+        $logger->info("Parsed headers: " . json_encode($headers, JSON_THROW_ON_ERROR));
 
         // Skip system/security emails to prevent loops
         if ($this->shouldSkipEmail($headers, $logger)) {
@@ -115,27 +108,22 @@ class Postfix
         $spamReason = '';
 
         // Check hash-based detection first (if enabled)
-        global $config;
-        $database = null;
         $skipSpamFilter = false;
 
         $logger->info("Starting hash detection check...");
-        if ($config['postfix']['spam_handling']['hash_detection'] ?? false) {
-            $logger->info("Hash detection is enabled, initializing database...");
+        if ($this->database !== null) {
+            $logger->info("Hash detection is enabled, using initialized database...");
             try {
-                $database = new \Cyford\Security\Classes\Database($config);
-                $logger->info("Database initialized successfully");
-
                 // Check if this hash is known spam
                 $logger->info("Checking for known spam hash...");
-                if ($database->isKnownSpamHash($subject, $body)) {
+                if ($this->database->isKnownSpamHash($subject, $body)) {
                     $isSpam = true;
                     $spamReason = 'Known spam pattern (hash match)';
                     $skipSpamFilter = true;
                     $logger->info("Email flagged as spam by hash detection.");
                 }
                 // Check if this hash is known clean
-                elseif ($database->isKnownCleanHash($subject, $body)) {
+                elseif ($this->database->isKnownCleanHash($subject, $body)) {
                     $isSpam = false;
                     $spamReason = 'Known clean pattern (hash match)';
                     $skipSpamFilter = true;
@@ -157,26 +145,16 @@ class Postfix
             $isSpam = $spamFilter->isSpam($headers, $body);
             if ($isSpam) {
                 $spamReason = $spamFilter->getLastSpamReason() ?? 'Local spam filter detection';
-                $logger->info("Local spam filter flagged email: {$spamReason}");
+                $logger->info("Local spam filter flagged email: $spamReason");
             } else {
                 $logger->info("Local spam filter: email is clean");
 
                 // Only check API if local filter didn't detect spam
-                if ($config['api']['check_spam_against_server'] ?? true) {
+                if (($this->config['api']['check_spam_against_server'] ?? false)) {
                     $logger->info("No local spam detected, checking with API...");
-                    $logger->info("DEBUG: About to create ApiClient instance");
                     try {
-                        $logger->info("DEBUG: Creating ApiClient with config");
-                        $logger->info("DEBUG: API Email: " . ($config['api']['credentials']['email'] ?? 'NOT SET'));
-                        $logger->info("DEBUG: API Password: " . (empty($config['api']['credentials']['password']) ? 'NOT SET' : 'SET'));
-
-                        try {
-                            $apiClient = new \Cyford\Security\Classes\ApiClient($config, $logger);
-                            $logger->info("DEBUG: ApiClient created successfully");
-                        } catch (Exception $e) {
-                            $logger->error("ERROR: Failed to create ApiClient: " . $e->getMessage());
-                            throw $e;
-                        }
+                        $apiClient = $this->getApiClient($logger);
+                        $logger->info("DEBUG: Using ApiClient");
                         $logger->info("DEBUG: About to call login()");
                         try {
                             $apiClient->login();
@@ -196,12 +174,12 @@ class Postfix
         }
 
         if ($isSpam) {
-            $logger->warning("Email flagged as spam. Reason: {$spamReason}");
+            $logger->warning("Email flagged as spam. Reason: $spamReason");
 
             // Report spam to server if enabled
-            if ($config['api']['report_spam_to_server'] ?? true) {
+            if ($this->config['api']['report_spam_to_server'] ?? true) {
                 try {
-                    $apiClient = new \Cyford\Security\Classes\ApiClient($config);
+                    $apiClient = $this->getApiClient($logger);
                     $apiClient->login();
                     $reportData = [
                         'email' => $headers['From'] ?? '',
@@ -210,7 +188,7 @@ class Postfix
                     $logger->info("Reporting spam to server - from: " . ($headers['From'] ?? 'unknown'));
 
                     $reportResult = $apiClient->reportSpam($reportData);
-                    $logger->info("Spam report response: " . json_encode($reportResult));
+                    $logger->info("Spam report response: " . json_encode($reportResult, JSON_THROW_ON_ERROR));
                     $logger->info("Spam reported to server successfully");
                 } catch (Exception $e) {
                     $logger->warning("Failed to report spam to server: " . $e->getMessage());
@@ -249,91 +227,6 @@ class Postfix
         $this->requeueEmail($emailData, $recipient, $logger);
     }
 
-
-
-    /**
-     * Check if Postfix is configured for integration.
-     */
-
-    public function checkConfig(): bool
-    {
-        $masterConfig = file_exists($this->masterConfigPath) ? file_get_contents($this->masterConfigPath) : '';
-
-        // Check for IP-based SMTP configuration
-        $externalSmtpCheck = preg_match('/\d+\.\d+\.\d+\.\d+:smtp\s+inet.*content_filter=security-filter:dummy/', $masterConfig);
-        $localhostSmtpCheck = strpos($masterConfig, '127.0.0.1:smtp inet') !== false;
-        $securityFilterCheck = strpos($masterConfig, 'security-filter unix - n n - - pipe') !== false;
-
-        if ($externalSmtpCheck && $localhostSmtpCheck && $securityFilterCheck) {
-            echo "Cyford WEB ARMOR (for PostFix) INITIATED!.\n";
-            return true;
-        }
-
-        echo "Missing Postfix configurations:\n";
-        if (!$externalSmtpCheck) {
-            echo " - External IP SMTP with content_filter is missing in {$this->masterConfigPath}.\n";
-        }
-        if (!$localhostSmtpCheck) {
-            echo " - Localhost SMTP service is missing in {$this->masterConfigPath}.\n";
-        }
-        if (!$securityFilterCheck) {
-            echo " - 'security-filter' service is missing in {$this->masterConfigPath}.\n";
-        }
-
-        return false;
-    }
-
-    /**
-     * Automatically apply missing configurations if allowed.
-     */
-    public function autoConfig(): void
-    {
-        echo "INFO: Checking and configuring Postfix for IP-based filtering...\n";
-
-        // Get server's public IP
-        $publicIP = $this->systems->getPublicIP();
-        if (!$publicIP) {
-            echo "ERROR: Could not determine server's public IP address.\n";
-            return;
-        }
-        echo "INFO: Detected public IP: {$publicIP}\n";
-
-        // Remove old global content_filter from main.cf if it exists
-        if (file_exists($this->mainConfigPath)) {
-            $mainConfigContent = file_get_contents($this->mainConfigPath);
-            if (strpos($mainConfigContent, 'content_filter = security-filter:dummy') !== false) {
-                echo "INFO: Removing old global content_filter from {$this->mainConfigPath}...\n";
-                $this->backupFile($this->mainConfigPath);
-                $mainConfigContent = str_replace("content_filter = security-filter:dummy\n", "", $mainConfigContent);
-                $mainConfigContent = str_replace("#content_filter = security-filter:dummy\n", "", $mainConfigContent);
-                file_put_contents($this->mainConfigPath, $mainConfigContent);
-                echo "SUCCESS: Old content_filter removed.\n";
-            }
-        }
-
-        // Configure master.cf with IP-based filtering
-        if (file_exists($this->masterConfigPath)) {
-            $masterConfigContent = file_get_contents($this->masterConfigPath);
-            echo "INFO: Configuring IP-based SMTP services in {$this->masterConfigPath}...\n";
-            
-            $this->backupFile($this->masterConfigPath);
-            
-            // Remove old entries and add new IP-based entries
-            $masterConfigContent = $this->removeOldEntries($masterConfigContent);
-            $newEntries = $this->generateIPBasedEntries($publicIP);
-            $masterConfigContent .= "\n" . $newEntries;
-            file_put_contents($this->masterConfigPath, $masterConfigContent);
-            
-            echo "SUCCESS: IP-based SMTP configuration applied.\n";
-            echo "INFO: External SMTP ({$publicIP}:25) - WITH security filter\n";
-            echo "INFO: Internal SMTP (127.0.0.1:25) - WITHOUT security filter\n";
-        } else {
-            echo "ERROR: {$this->masterConfigPath} does not exist.\n";
-        }
-
-        // Reload Postfix
-        $this->reload();
-    }
 
     /**
      * Process email from Postfix content filter with error handling
@@ -395,9 +288,9 @@ EOF;
         $from = $headers['From'] ?? '';
         $subject = $headers['Subject'] ?? '';
 
-        if (strpos($from, 'report-ip@') !== false ||
-            strpos($subject, '*** SECURITY information') !== false ||
-            strpos($headers['Auto-Submitted'] ?? '', 'auto-generated') !== false) {
+        if (str_contains($from, 'report-ip@') ||
+            str_contains($subject, '*** SECURITY information') ||
+            str_contains($headers['Auto-Submitted'] ?? '', 'auto-generated')) {
             $logger->info("Skipping system/security email to prevent processing loop");
             return true;
         }
@@ -410,7 +303,7 @@ EOF;
     private function isAlreadyProcessed(array $headers, string $emailData, $logger): bool
     {
         $hasSecurityHeader = isset($headers['X-Processed-By-Security-Filter']);
-        $hasSecurityHeaderInRaw = strpos($emailData, 'X-Processed-By-Security-Filter:') !== false;
+        $hasSecurityHeaderInRaw = str_contains($emailData, 'X-Processed-By-Security-Filter:');
         
         $logger->info("Security header check - In parsed headers: " . ($hasSecurityHeader ? 'YES' : 'NO') . 
                       ", In raw data: " . ($hasSecurityHeaderInRaw ? 'YES' : 'NO'));
@@ -493,7 +386,7 @@ EOF;
         // Postfix often passes recipient info in the process environment
         if (!empty($_SERVER['argv'])) {
             foreach ($_SERVER['argv'] as $arg) {
-                if (strpos($arg, '@') !== false) {
+                if (str_contains($arg, '@')) {
                     $recipient = $this->extractEmailAddress($arg);
                     if (!empty($recipient)) {
                         $logger->info("Recipient found in server argv: {$recipient}");
@@ -506,8 +399,8 @@ EOF;
         // Method 6: Check for --recipient argument from Postfix
         global $argv;
         if (!empty($argv)) {
-            for ($i = 0; $i < count($argv); $i++) {
-                if ($argv[$i] === '--recipient' && isset($argv[$i + 1])) {
+            foreach ($argv as $i => $iValue) {
+                if ($iValue === '--recipient' && isset($argv[$i + 1])) {
                     $recipient = $this->extractEmailAddress($argv[$i + 1]);
                     if (!empty($recipient)) {
                         $logger->info("Recipient found in --recipient argument: {$recipient}");
@@ -515,18 +408,18 @@ EOF;
                     }
                 }
                 // Also check for --recipient=email format
-                if (strpos($argv[$i], '--recipient=') === 0) {
-                    $recipient = $this->extractEmailAddress(substr($argv[$i], 12));
+                if (str_starts_with($iValue, '--recipient=')) {
+                    $recipient = $this->extractEmailAddress(substr($iValue, 12));
                     if (!empty($recipient)) {
                         $logger->info("Recipient found in --recipient= argument: {$recipient}");
                         return $recipient;
                     }
                 }
             }
-            
+
             // Fallback: any argument with @
             foreach ($argv as $arg) {
-                if (strpos($arg, '@') !== false) {
+                if (str_contains($arg, '@')) {
                     $recipient = $this->extractEmailAddress($arg);
                     if (!empty($recipient)) {
                         $logger->info("Recipient found in command line: {$recipient}");
@@ -538,9 +431,9 @@ EOF;
         
         // Method 7: Try to extract from any header containing an email
         foreach ($headers as $headerName => $headerValue) {
-            if (strpos($headerValue, '@') !== false && !in_array($headerName, ['From', 'Reply-To', 'Return-Path', 'Sender'])) {
+            if (str_contains($headerValue, '@') && !in_array($headerName, ['From', 'Reply-To', 'Return-Path', 'Sender'])) {
                 $recipient = $this->extractEmailAddress($headerValue);
-                if (!empty($recipient) && strpos($recipient, 'cyfordtechnologies.com') !== false) {
+                if (!empty($recipient) && str_contains($recipient, 'cyfordtechnologies.com')) {
                     $logger->info("Recipient found in {$headerName} header: {$recipient}");
                     return $recipient;
                 }
@@ -585,7 +478,7 @@ EOF;
         if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
             $message = "Invalid recipient email after extraction: {$recipient}";
             $logger->error($message);
-            throw new \InvalidArgumentException($message);
+            throw new InvalidArgumentException($message);
         }
 
         // Add custom header to prevent reprocessing
@@ -673,47 +566,47 @@ EOF;
         try {
             // Read greeting
             $response = fgets($socket);
-            if (substr($response, 0, 3) !== '220') {
+            if (!str_starts_with($response, '220')) {
                 throw new RuntimeException("SMTP server error: {$response}");
             }
             
             // HELO
             fwrite($socket, "HELO localhost\r\n");
             $response = fgets($socket);
-            if (substr($response, 0, 3) !== '250') {
+            if (!str_starts_with($response, '250')) {
                 throw new RuntimeException("HELO failed: {$response}");
             }
             
             // MAIL FROM
             fwrite($socket, "MAIL FROM:<>\r\n");
             $response = fgets($socket);
-            if (substr($response, 0, 3) !== '250') {
+            if (!str_starts_with($response, '250')) {
                 throw new RuntimeException("MAIL FROM failed: {$response}");
             }
             
             // RCPT TO
             fwrite($socket, "RCPT TO:<{$recipient}>\r\n");
             $response = fgets($socket);
-            if (substr($response, 0, 3) !== '250') {
+            if (!str_starts_with($response, '250')) {
                 throw new RuntimeException("RCPT TO failed: {$response}");
             }
             
             // DATA
             fwrite($socket, "DATA\r\n");
             $response = fgets($socket);
-            if (substr($response, 0, 3) !== '354') {
+            if (!str_starts_with($response, '354')) {
                 throw new RuntimeException("DATA failed: {$response}");
             }
             
             // Send email data
             fwrite($socket, $emailData);
-            if (substr($emailData, -2) !== "\r\n") {
+            if (!str_ends_with($emailData, "\r\n")) {
                 fwrite($socket, "\r\n");
             }
             fwrite($socket, ".\r\n");
             
             $response = fgets($socket);
-            if (substr($response, 0, 3) !== '250') {
+            if (!str_starts_with($response, '250')) {
                 throw new RuntimeException("Email delivery failed: {$response}");
             }
             
@@ -927,10 +820,10 @@ EOF;
                 
                 // Create directories directly (no sudo in chroot)
                 $success = true;
-                $success = $success && mkdir($maildirPath, 0775, true);
-                $success = $success && mkdir($maildirPath . '/cur', 0775, true);
-                $success = $success && mkdir($maildirPath . '/new', 0775, true);
-                $success = $success && mkdir($maildirPath . '/tmp', 0775, true);
+                $success = !mkdir($maildirPath, 0775, true) && !is_dir($maildirPath);
+                $success = $success && !mkdir($concurrentDirectory = $maildirPath . '/cur', 0775, true) && !is_dir($concurrentDirectory);
+                $success = $success && !mkdir($concurrentDirectory = $maildirPath . '/new', 0775, true) && !is_dir($concurrentDirectory);
+                $success = $success && !mkdir($concurrentDirectory = $maildirPath . '/tmp', 0775, true) && !is_dir($concurrentDirectory);
                 
                 if ($success) {
                     $logger->info("Created spam folder: {$maildirPath}");
@@ -949,7 +842,7 @@ EOF;
             
             // Create spam storage if it doesn't exist
             if (!is_dir($userSpamPath)) {
-                if (!mkdir($userSpamPath, 0755, true)) {
+                if (!mkdir($userSpamPath, 0755, true) && !is_dir($userSpamPath)) {
                     $logger->error("Failed to create system quarantine folder: {$userSpamPath}");
                     throw new \RuntimeException("Quarantine failed - cannot create spam folder");
                 }
@@ -959,7 +852,7 @@ EOF;
         }
         
         // Save email to determined spam location
-        $filename = time() . '.' . uniqid() . '.spam';
+        $filename = time() . '.' . uniqid('', true) . '.spam';
         $fullSpamFile = $spamFile . $filename;
         
         if (file_put_contents($fullSpamFile, $emailData)) {
@@ -1097,7 +990,9 @@ EOF;
         // Ensure spam log directory exists
         $logDir = dirname($spamLogFile);
         if (!is_dir($logDir)) {
-            mkdir($logDir, 0755, true);
+            if (!mkdir($logDir, 0755, true) && !is_dir($logDir)) {
+                throw new \RuntimeException(sprintf('Directory "%s" was not created', $logDir));
+            }
         }
         
         $timestamp = date('Y-m-d H:i:s');
@@ -1137,7 +1032,7 @@ EOF;
     {
         $from = $headers['From'] ?? 'unknown';
         $subject = $headers['Subject'] ?? 'No Subject';
-        $messageId = $headers['Message-ID'] ?? uniqid();
+        $messageId = $headers['Message-ID'] ?? uniqid('', true);
         
         return <<<EOF
 From: MAILER-DAEMON@{$_SERVER['SERVER_NAME']}
@@ -1162,7 +1057,7 @@ EOF;
 
         // Ensure backup directory exists and is writable
         if (!is_dir($backupDir)) {
-            if (!mkdir($backupDir, 0755, true)) {
+            if (!mkdir($backupDir, 0755, true) && !is_dir($backupDir)) {
                 // Try /tmp as fallback
                 $backupDir = '/tmp';
                 $backupFile = "{$backupDir}/" . basename($filePath) . ".backup_{$timestamp}";
@@ -1186,38 +1081,6 @@ EOF;
     }
 
     /**
-     * Reload Postfix service.
-     */
-    public function reload(): void
-    {
-        echo "Reloading Postfix configuration...\n";
-
-        $output = shell_exec("sudo {$this->postfixCommand} reload 2>&1");
-
-        if (empty($output)) {
-            throw new RuntimeException("Failed to reload Postfix. Ensure the Postfix service is running.");
-        }
-
-        echo "Postfix reload output: {$output}\n";
-    }
-
-    /**
-     * Parse headers from raw header string
-     */
-    function parseHeaders($rawHeaders)
-    {
-        $headers = [];
-        $lines = explode("\n", $rawHeaders);
-        foreach ($lines as $line) {
-            if (strpos($line, ':') !== false) {
-                list($key, $value) = explode(':', $line, 2);
-                $headers[trim($key)] = trim($value);
-            }
-        }
-        return $headers;
-    }
-
-    /**
      * Send spam data to API if configured
      */
     private function sendSpamToAPI(string $subject, string $body, array $headers, $logger): void
@@ -1236,7 +1099,7 @@ EOF;
             // Extract client IP from headers
             $clientIP = '';
             if (!empty($headers['Received'])) {
-                preg_match('/\[(\d+\.\d+\.\d+\.\d+)\]/', $headers['Received'], $matches);
+                preg_match('/\[(\d+\.\d+\.\d+\.\d+)]/', $headers['Received'], $matches);
                 $clientIP = $matches[1] ?? '';
             }
             
@@ -1268,7 +1131,7 @@ EOF;
             exit(1);
         }
         
-        list($headers, $body) = $this->parseEmail($emailData);
+        [$headers, $body] = $this->parseEmail($emailData);
         $recipient = $this->getRecipient($headers, $logger);
         
         switch ($onSystemError) {
@@ -1365,13 +1228,21 @@ EOF;
         $quarantineFolder = "/home/{$realUser}/Maildir/.SystemErrors";
         
         if (!is_dir($quarantineFolder)) {
-            mkdir($quarantineFolder, 0755, true);
-            mkdir($quarantineFolder . '/cur', 0755, true);
-            mkdir($quarantineFolder . '/new', 0755, true);
-            mkdir($quarantineFolder . '/tmp', 0755, true);
+            if (!mkdir($quarantineFolder, 0755, true) && !is_dir($quarantineFolder)) {
+                throw new \RuntimeException(sprintf('Directory "%s" was not created', $quarantineFolder));
+            }
+            if (!mkdir($concurrentDirectory = $quarantineFolder . '/cur', 0755, true) && !is_dir($concurrentDirectory)) {
+                throw new \RuntimeException(sprintf('Directory "%s" was not created', $concurrentDirectory));
+            }
+            if (!mkdir($concurrentDirectory = $quarantineFolder . '/new', 0755, true) && !is_dir($concurrentDirectory)) {
+                throw new \RuntimeException(sprintf('Directory "%s" was not created', $concurrentDirectory));
+            }
+            if (!mkdir($concurrentDirectory = $quarantineFolder . '/tmp', 0755, true) && !is_dir($concurrentDirectory)) {
+                throw new \RuntimeException(sprintf('Directory "%s" was not created', $concurrentDirectory));
+            }
         }
         
-        $filename = time() . '.' . uniqid() . '.syserr';
+        $filename = time() . '.' . uniqid('', true) . '.syserr';
         $errorFile = $quarantineFolder . '/new/' . $filename;
         
         // Add error information to email
@@ -1482,18 +1353,4 @@ EOF;
         }
     }
 
-    /**
-     * Get Postfix service status.
-     */
-    public function getStatus(): string
-    {
-        $command = "systemctl status postfix";
-        $output = shell_exec($command);
-
-        if (!$output) {
-            throw new RuntimeException('Failed to retrieve Postfix status.');
-        }
-
-        return $output;
-    }
 }
