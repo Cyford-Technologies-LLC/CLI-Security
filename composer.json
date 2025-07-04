@@ -5,7 +5,8 @@
         "php": "8.3",
         "guzzlehttp/guzzle": "^7.9",
         "symfony/monolog-bundle": "^3.10",
-      "ext-curl": "*"
+      "ext-curl": "*",
+      "ext-pdo": "*"
     },
     "autoload": {
         "psr-4": {
