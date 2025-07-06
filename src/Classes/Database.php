@@ -10,16 +10,21 @@ class Database
     private PDO $pdo;
     private static array $cache = [];
     private int $cacheTtl;
+    private array $config;
     
     public function __construct(array $config)
     {
+        $this->config = $config;
+        $this->initializeEnvironment();
         $dbPath = $config['database']['path'] ?? '/tmp/security.db';
         $this->cacheTtl = $config['database']['cache_ttl'] ?? 300;
         
         // Ensure database directory exists
         $dbDir = dirname($dbPath);
-        if (!mkdir($dbDir, 0775, true) && !is_dir($dbDir)) {
-            throw new RuntimeException("Failed to create database directory: {$dbDir}");
+        if (!is_dir($dbDir)) {
+            if (!mkdir($dbDir, 0775, true)) {
+                throw new RuntimeException("Failed to create database directory: {$dbDir}");
+            }
         }
         
         try {
@@ -304,14 +309,42 @@ class Database
     }
     
     /**
+     * Generate secure hash using 3-step HMAC algorithm
+     */
+    private function generateSecureHash(string $subject, string $body, int $version = 1): string
+    {
+        if ($version !== 1) {
+            throw new RuntimeException("Unsupported hash version: $version");
+        }
+        
+        $primaryKeyPath = $this->config['hash']['primary_key_path'] ?? '/etc/cyford-security/keys/primary.key';
+        $secondaryKeyPath = $this->config['hash']['secondary_key_path'] ?? '/etc/cyford-security/keys/secondary.key';
+        
+        if (!file_exists($primaryKeyPath) || !file_exists($secondaryKeyPath)) {
+            throw new RuntimeException("Hash key files not found. Please ensure keys exist at: $primaryKeyPath and $secondaryKeyPath");
+        }
+        
+        $primaryKey = trim(file_get_contents($primaryKeyPath));
+        $secondaryKey = trim(file_get_contents($secondaryKeyPath));
+        
+        // Clean content
+        $cleanSubject = trim(strtolower($subject));
+        $cleanBody = trim(preg_replace('/\s+/', ' ', strip_tags($body)));
+        
+        // 3-step HMAC process
+        $step1 = hash_hmac('sha256', $cleanSubject . '|' . $cleanBody, $primaryKey);
+        $step2 = hash_hmac('sha256', $step1, $secondaryKey);
+        return hash_hmac('sha256', $step2, date('Y-m-d'));
+    }
+    
+    /**
      * Check if email hash is known spam (previously confirmed by spam filter)
      */
     public function isKnownSpamHash(string $subject, string $body): bool
     {
-        $subjectHash = hash('sha256', trim(strtolower($subject)));
-        $bodyHash = hash('sha256', trim(preg_replace('/\s+/', ' ', strip_tags($body))));
-        $combinedHash = hash('sha256', $subjectHash . $bodyHash);
+        $combinedHash = $this->generateSecureHash($subject, $body);
         
+        // Try new secure hash first
         $sql = "SELECT is_spam FROM spam_hashes WHERE combined_hash = ? AND is_spam = 1";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([$combinedHash]);
@@ -325,6 +358,23 @@ class Database
             return true;
         }
         
+        // Fallback to legacy hash for backward compatibility
+        $legacySubjectHash = hash('sha256', trim(strtolower($subject)));
+        $legacyBodyHash = hash('sha256', trim(preg_replace('/\s+/', ' ', strip_tags($body))));
+        $legacyCombinedHash = hash('sha256', $legacySubjectHash . $legacyBodyHash);
+        
+        $sql = "SELECT is_spam FROM spam_hashes WHERE combined_hash = ? AND is_spam = 1";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([$legacyCombinedHash]);
+        
+        $legacyResult = $stmt->fetchColumn();
+        
+        if ($legacyResult) {
+            // Migrate to new hash format
+            $this->recordEmailHash($subject, $body, true);
+            return true;
+        }
+        
         return false;
     }
     
@@ -333,10 +383,9 @@ class Database
      */
     public function isKnownCleanHash(string $subject, string $body): bool
     {
-        $subjectHash = hash('sha256', trim(strtolower($subject)));
-        $bodyHash = hash('sha256', trim(preg_replace('/\s+/', ' ', strip_tags($body))));
-        $combinedHash = hash('sha256', $subjectHash . $bodyHash);
+        $combinedHash = $this->generateSecureHash($subject, $body);
         
+        // Try new secure hash first
         $sql = "SELECT is_spam FROM spam_hashes WHERE combined_hash = ? AND is_spam = 0";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([$combinedHash]);
@@ -347,6 +396,23 @@ class Database
             // Update last seen count for statistics
             $sql = "UPDATE spam_hashes SET last_seen = CURRENT_TIMESTAMP, count = count + 1 WHERE combined_hash = ?";
             $this->pdo->prepare($sql)->execute([$combinedHash]);
+            return true;
+        }
+        
+        // Fallback to legacy hash for backward compatibility
+        $legacySubjectHash = hash('sha256', trim(strtolower($subject)));
+        $legacyBodyHash = hash('sha256', trim(preg_replace('/\s+/', ' ', strip_tags($body))));
+        $legacyCombinedHash = hash('sha256', $legacySubjectHash . $legacyBodyHash);
+        
+        $sql = "SELECT is_spam FROM spam_hashes WHERE combined_hash = ? AND is_spam = 0";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([$legacyCombinedHash]);
+        
+        $legacyResult = $stmt->fetchColumn();
+        
+        if ($legacyResult !== false) {
+            // Migrate to new hash format
+            $this->recordEmailHash($subject, $body, false);
             return true;
         }
         
@@ -367,9 +433,9 @@ class Database
      */
     public function recordEmailHash(string $subject, string $body, bool $isSpam): void
     {
+        $combinedHash = $this->generateSecureHash($subject, $body);
         $subjectHash = hash('sha256', trim(strtolower($subject)));
         $bodyHash = hash('sha256', trim(preg_replace('/\s+/', ' ', strip_tags($body))));
-        $combinedHash = hash('sha256', $subjectHash . $bodyHash);
         
         // Create preview of body (first 200 chars, no HTML)
         $bodyPreview = substr(trim(preg_replace('/\s+/', ' ', strip_tags($body))), 0, 200);
@@ -528,7 +594,9 @@ class Database
      */
     public function syncDetectionAlgorithm(array $data): void
     {
-        if (isset($data['server_id'])) {
+
+
+        if (isset($data['id'])) {
             // Update existing algorithm
             $sql = "UPDATE detection_algorithms SET 
                     name = ?, threat_category = ?, detection_type = ?, target = ?, 
@@ -538,9 +606,9 @@ class Database
             
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute([
-                $data['name'], $data['threat_category'], $data['detection_type'],
+                $data['name'], $data['category'], $data['detection_type'],
                 $data['target'], $data['pattern'], $data['score'],
-                $data['enabled'] ?? 1, $data['priority'] ?? 0, $data['server_id']
+                $data['enabled'] ?? 1, $data['priority'] ?? 0, $data['id']
             ]);
             
             // If no rows affected, insert new
@@ -557,13 +625,15 @@ class Database
      */
     private function insertDetectionAlgorithm(array $data): void
     {
+
+        $category = $data['threat_category'] ?? $data['category'];
         $sql = "INSERT INTO detection_algorithms 
                 (server_id, name, threat_category, detection_type, target, pattern, score, enabled, priority, server_updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
         
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([
-            $data['server_id'] ?? null, $data['name'], $data['threat_category'],
+            $data['id'] ?? null, $data['name'], $category,
             $data['detection_type'], $data['target'], $data['pattern'],
             $data['score'] ?? 0, $data['enabled'] ?? 1, $data['priority'] ?? 0
         ]);
@@ -576,6 +646,84 @@ class Database
     {
         $sql = "DELETE FROM detection_algorithms WHERE server_id = ?";
         $this->pdo->prepare($sql)->execute([$serverId]);
+    }
+
+    /**
+     * Initialize environment detection
+     */
+    private function initializeEnvironment(): void
+    {
+        $envFile = '/tmp/cyford-security/env.txt';
+        $envDir = dirname($envFile);
+        
+        // Create directory if it doesn't exist
+        if (!is_dir($envDir)) {
+            mkdir($envDir, 0755, true);
+        }
+        
+        // Check if env file exists and is valid
+        if (file_exists($envFile)) {
+            $content = trim(file_get_contents($envFile));
+            if ($content === 'docker=1' || $content === 'docker=0') {
+                return; // Valid environment file exists
+            }
+        }
+        
+        // Detect environment and create file
+        $isDocker = $this->detectDockerEnvironment();
+        $envContent = $isDocker ? 'docker=1' : 'docker=0';
+        
+        file_put_contents($envFile, $envContent);
+        chmod($envFile, 0644);
+    }
+    
+    /**
+     * Detect if running in Docker environment
+     */
+    private function detectDockerEnvironment(): bool
+    {
+        // Method 1: Check for .dockerenv file
+        if (file_exists('/.dockerenv')) {
+            return true;
+        }
+        
+        // Method 2: Check environment variables
+        if (!empty($_ENV['DOCKER_ENV']) || !empty(getenv('DOCKER_ENV'))) {
+            return true;
+        }
+        
+        // Method 3: Check cgroup for docker
+        if (file_exists('/proc/1/cgroup')) {
+            $cgroup = file_get_contents('/proc/1/cgroup');
+            if (strpos($cgroup, 'docker') !== false || strpos($cgroup, 'containerd') !== false) {
+                return true;
+            }
+        }
+        
+        // Method 4: Check for container-specific files
+        if (file_exists('/run/.containerenv')) {
+            return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Check if running in Docker (static method for global use)
+     */
+    public static function isDocker(): bool
+    {
+        $envFile = '/tmp/cyford-security/env.txt';
+        
+        if (file_exists($envFile)) {
+            $content = trim(file_get_contents($envFile));
+            return $content === 'docker=1';
+        }
+        
+        // Fallback detection if file doesn't exist
+        return file_exists('/.dockerenv') || 
+               !empty($_ENV['DOCKER_ENV']) || 
+               !empty(getenv('DOCKER_ENV'));
     }
 
     /**

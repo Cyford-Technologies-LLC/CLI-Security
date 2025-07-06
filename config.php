@@ -20,12 +20,10 @@ if (!function_exists('env')) {
 // Configuration for API endpoints, authentication, etc.
 return [
     'api' => [
-        'login_endpoint' => 'https://api.cyfordtechnologies.com/api/auth/v1/login', // Login URL
-        'report_endpoint' => 'https://api.cyfordtechnologies.com/api/security/v1/report-ip', // Report URL
-        'analyze_spam_endpoint' => 'https://api.cyfordtechnologies.com/api/security/v1/analyze-spam', // Spam analysis URL
         'check_spam_against_server' => true, // Enable server-side spam checking
         'report_spam_to_server' => false, // Enable spam reporting to server
         'spam_threshold' => 70, // Spam detection threshold (30-90)
+        'client_id' => env('API_CLIENT_ID', ''), // 64-character unique client ID from .env - DO NOT CHANGE ONCE SET
         'credentials' => [
             'email' => env('API_EMAIL', ''),  // Account email for API login
             'password' => env('API_PASSWORD', ''),  // Account password for API login
@@ -88,6 +86,11 @@ return [
         'type' => 'sqlite', // Portable database, no installation required
         'path' => '/var/spool/postfix/cyford-security.db', // SQLite database file (persistent and chroot accessible)
         'cache_ttl' => 300, // Cache time-to-live in seconds (5 minutes)
+    ],
+    'hash' => [
+        'version' => 1, // Hash algorithm version
+        'primary_key_path' => '/etc/cyford-security/keys/primary.key',
+        'secondary_key_path' => '/etc/cyford-security/keys/secondary.key',
     ],
     'task_queue' => [
         'queue_file' => '/var/spool/postfix/cyford-tasks.json', // Task queue file (chroot accessible)

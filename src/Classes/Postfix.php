@@ -173,6 +173,16 @@ class Postfix
             }
         }
 
+        // Record hash pattern for future detection
+        if ($this->database !== null && !$skipSpamFilter) {
+            try {
+                $this->database->recordEmailHash($subject, $body, $isSpam);
+                $logger->info("Email hash recorded as " . ($isSpam ? 'spam' : 'clean') . " for future detection");
+            } catch (Exception $e) {
+                $logger->warning("Failed to record email hash: " . $e->getMessage());
+            }
+        }
+
         if ($isSpam) {
             $logger->warning("Email flagged as spam. Reason: $spamReason");
 

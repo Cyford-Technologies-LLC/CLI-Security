@@ -209,10 +209,10 @@ protocol lda {
   mail_plugins = \$mail_plugins sieve
   
   # Address to use when returning bounce messages
-  postmaster_address = postmaster@{$_SERVER['SERVER_NAME'] ?? 'localhost'}
+  postmaster_address = postmaster@{$_SERVER['SERVER_NAME']}
   
   # Hostname to use in various parts of sent mails, eg. in Message-Id.
-  hostname = {$_SERVER['SERVER_NAME'] ?? 'localhost'}
+  hostname = {$_SERVER['SERVER_NAME']}
   
   # If user is over quota, return with temporary failure instead of
   # bouncing the mail.

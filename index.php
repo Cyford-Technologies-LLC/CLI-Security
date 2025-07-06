@@ -36,7 +36,7 @@ try {
             require_once __DIR__ . '/src/Classes/Systems.php';
             
             $config = require __DIR__ . '/config.php';
-            $internal = new \Cyford\Security\Classes\Internal($config, null);
+            $internal = new \Cyford\Security\Classes\Internal($config, $logger);
             
             // Parse command line arguments manually for internal commands
             $args = [];

@@ -1,5 +1,27 @@
 #!/bin/bash
 
+# Initialize environment detection
+source_env() {
+    ENV_FILE="/tmp/cyford-security/env.txt"
+    if [ -f "$ENV_FILE" ]; then
+        source "$ENV_FILE"
+    else
+        # Create environment file
+        mkdir -p /tmp/cyford-security
+        if [ -f /.dockerenv ] || [ -n "$DOCKER_ENV" ]; then
+            echo "docker=1" > "$ENV_FILE"
+            docker=1
+        else
+            echo "docker=0" > "$ENV_FILE"
+            docker=0
+        fi
+        chmod 644 "$ENV_FILE"
+    fi
+}
+
+# Load environment
+source_env
+
 # Get the queue directory from postfix
 QUEUE_DIR=$(postconf -h queue_directory)
 echo "Postfix queue directory: $QUEUE_DIR"
@@ -27,8 +49,12 @@ EOF
 # Set proper permissions on sudoers file
 sudo chmod 440 /etc/sudoers.d/report-ip-postfix
 
-# Kill existing report-ip processes to apply group changes
-sudo pkill -u report-ip || true
+# Kill existing report-ip processes to apply group changes (skip in Docker)
+if [ "$docker" != "1" ]; then
+    sudo pkill -u report-ip || true
+else
+    echo "Skipping process kill in Docker environment"
+fi
 
 # Test the setup
 echo "Testing sudoers configuration..."
@@ -47,5 +73,15 @@ else
     sudo -u report-ip groups
 fi
 
-echo "Setup complete. Restart Postfix to ensure all changes take effect:"
-echo "sudo systemctl restart postfix"
+echo "Setup complete."
+
+# Check if we're in Docker and restart appropriately
+if [ "$docker" = "1" ]; then
+    echo "Docker environment detected - services managed by supervisor"
+    echo "No manual restart needed"
+else
+    echo "Restart Postfix to ensure all changes take effect:"
+    echo "sudo systemctl restart postfix"
+    # Optionally restart automatically
+    # sudo systemctl restart postfix
+fi

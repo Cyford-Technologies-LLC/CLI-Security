@@ -2,16 +2,22 @@
 namespace Cyford\Security\Classes;
 
 use Exception;
+use Cyford\Security\Classes\ApiClient;
 
 class Internal
 {
     private array $config;
     private $logger;
+    private ApiClient $apiClient;
+
 
     public function __construct(array $config, $logger = null)
     {
         $this->config = $config;
         $this->logger = $logger;
+        $this->apiClient = new ApiClient($config, $logger);
+
+
     }
 
     /**
@@ -122,18 +128,14 @@ class Internal
                 $this->exportDetectionAlgorithms($args['format'] ?? 'json');
                 break;
                 
-            case 'import-algorithms':
-                $this->importDetectionAlgorithms($args['file'] ?? '');
-                break;
-                
             case 'algorithm-stats':
                 $this->showAlgorithmStats();
                 break;
-                
-            case 'sync-algorithms':
-                $this->syncAlgorithms();
+
+            case 'update-algorithms':
+                $this->apiClient->updateAlgorithms();
                 break;
-                
+
             case 'recreate-database':
                 $this->recreateDatabase();
                 break;
@@ -162,10 +164,22 @@ class Internal
             $dbPath = $this->config['database']['path'];
             $dbDir = dirname($dbPath);
             
-            exec("sudo chown postfix:postfix " . escapeshellarg($dbPath));
-            exec("sudo chmod 664 " . escapeshellarg($dbPath));
-            exec("sudo chown postfix:postfix " . escapeshellarg($dbDir));
-            exec("sudo chmod 755 " . escapeshellarg($dbDir));
+            // Check if we're in Docker environment
+            $isDocker = Database::isDocker();
+            
+            if ($isDocker) {
+                // In Docker, use direct commands without sudo
+                exec("chown postfix:postfix " . escapeshellarg($dbPath) . " 2>/dev/null");
+                exec("chmod 664 " . escapeshellarg($dbPath) . " 2>/dev/null");
+                exec("chown postfix:postfix " . escapeshellarg($dbDir) . " 2>/dev/null");
+                exec("chmod 755 " . escapeshellarg($dbDir) . " 2>/dev/null");
+            } else {
+                // On host system, use sudo
+                exec("sudo chown postfix:postfix " . escapeshellarg($dbPath));
+                exec("sudo chmod 664 " . escapeshellarg($dbPath));
+                exec("sudo chown postfix:postfix " . escapeshellarg($dbDir));
+                exec("sudo chmod 755 " . escapeshellarg($dbDir));
+            }
             
             echo "✅ Database permissions set for Postfix user\n";
             
@@ -436,71 +450,8 @@ class Internal
         
         return $csv;
     }
-    
-    /**
-     * Sync algorithms - create DB and migrate existing algorithms
-     */
-    private function syncAlgorithms(): void
-    {
-        echo "🔄 Syncing Detection Algorithms...\n";
-        
-        try {
-            // Initialize database
-            $database = new Database($this->config);
-            echo "✅ Database initialized\n";
-            
-            // Migrate existing algorithms
-            $this->migrateExistingAlgorithms($database);
-            
-            // Clear cache
-            \Cyford\Security\Classes\ThreatCategory\BaseThreatDetector::clearCache();
-            echo "✅ Algorithm cache cleared\n";
-            
-            echo "🎉 Algorithm sync completed!\n";
-            
-        } catch (\Exception $e) {
-            echo "❌ Sync failed: " . $e->getMessage() . "\n";
-        }
-    }
-    
-    /**
-     * Migrate existing hard-coded algorithms to database
-     */
-    private function migrateExistingAlgorithms(Database $database): void
-    {
-        $algorithms = [
-            // Spam algorithms
-            ['name' => 'Suspicious Subject - Hello', 'threat_category' => 'spam', 'detection_type' => 'keyword', 'target' => 'subject', 'pattern' => 'hello', 'score' => 10],
-            ['name' => 'Suspicious Subject - Hi', 'threat_category' => 'spam', 'detection_type' => 'keyword', 'target' => 'subject', 'pattern' => 'hi', 'score' => 10],
-            ['name' => 'Suspicious Subject - Urgent', 'threat_category' => 'spam', 'detection_type' => 'keyword', 'target' => 'subject', 'pattern' => 'urgent', 'score' => 15],
-            ['name' => 'Spam Pattern - No Inquiry', 'threat_category' => 'spam', 'detection_type' => 'regex', 'target' => 'body', 'pattern' => '/(\\bno inquiryso resolve\\b)/i', 'score' => 25],
-            ['name' => 'Spam Pattern - Amounted Old', 'threat_category' => 'spam', 'detection_type' => 'regex', 'target' => 'body', 'pattern' => '/\\b(amounted old strictly|timed blind)\\b/i', 'score' => 20],
-            
-            // Phishing algorithms from config
-            ['name' => 'Phishing Keyword - Invoice', 'threat_category' => 'phishing', 'detection_type' => 'keyword', 'target' => 'subject,body', 'pattern' => 'invoice', 'score' => 15],
-            ['name' => 'Phishing Keyword - Payment', 'threat_category' => 'phishing', 'detection_type' => 'keyword', 'target' => 'subject,body', 'pattern' => 'payment', 'score' => 15],
-            ['name' => 'Phishing Keyword - Click Here', 'threat_category' => 'phishing', 'detection_type' => 'keyword', 'target' => 'body', 'pattern' => 'click here', 'score' => 20],
-            ['name' => 'Phishing Keyword - Verify Account', 'threat_category' => 'phishing', 'detection_type' => 'keyword', 'target' => 'body', 'pattern' => 'verify account', 'score' => 25],
-            
-            // Suspicious domains
-            ['name' => 'Suspicious Domain - bit.ly', 'threat_category' => 'phishing', 'detection_type' => 'domain', 'target' => 'body', 'pattern' => 'bit.ly', 'score' => 20],
-            ['name' => 'Suspicious Domain - tinyurl', 'threat_category' => 'phishing', 'detection_type' => 'domain', 'target' => 'body', 'pattern' => 'tinyurl.com', 'score' => 20],
-            ['name' => 'Malicious Domain - optussnet', 'threat_category' => 'malware', 'detection_type' => 'domain', 'target' => 'body', 'pattern' => 'optussnet.com.au', 'score' => 50],
-            ['name' => 'Malicious Domain - emlmind', 'threat_category' => 'malware', 'detection_type' => 'domain', 'target' => 'body', 'pattern' => 'emlmind.com', 'score' => 50],
-        ];
-        
-        $migrated = 0;
-        foreach ($algorithms as $algo) {
-            try {
-                $database->syncDetectionAlgorithm($algo);
-                $migrated++;
-            } catch (\Exception $e) {
-                echo "⚠️ Failed to migrate '" . $algo['name'] . "': " . $e->getMessage() . "\n";
-            }
-        }
-        
-        echo "✅ Migrated $migrated algorithms to database\n";
-    }
+
+
     
     /**
      * Recreate database with all tables
@@ -858,9 +809,14 @@ class Internal
             file_put_contents($dovecotUsers, $dovecotEntry, FILE_APPEND);
             echo "✅ Added to Dovecot users\n";
             
-            // 6. Reload services
-            exec("systemctl reload postfix 2>/dev/null");
-            exec("systemctl reload dovecot 2>/dev/null");
+            // 6. Reload services (skip in Docker)
+            $isDocker = Database::isDocker();
+            if (!$isDocker) {
+                exec("systemctl reload postfix 2>/dev/null");
+                exec("systemctl reload dovecot 2>/dev/null");
+            } else {
+                echo "ℹ️  Skipping service reload in Docker environment\n";
+            }
             
             echo "\n🎉 User created successfully!\n";
             echo "\n📧 Email Details:\n";
@@ -1348,10 +1304,13 @@ EOF;
         echo "🔍 Checking Dovecot Sieve requirements...\n";
         
         // Check if Dovecot is installed
-        exec("systemctl is-active dovecot 2>/dev/null", $output, $returnCode);
-        if ($returnCode !== 0) {
-            echo "❌ Dovecot is not running. Please install and start Dovecot first.\n";
-            return false;
+        $isDocker = Database::isDocker();
+        if (!$isDocker) {
+            exec("systemctl is-active dovecot 2>/dev/null", $output, $returnCode);
+            if ($returnCode !== 0) {
+                echo "❌ Dovecot is not running. Please install and start Dovecot first.\n";
+                return false;
+            }
         }
         echo "✅ Dovecot is running\n";
         
@@ -1551,15 +1510,20 @@ DOVECOT;
             return;
         }
         
-        // Restart Dovecot to apply changes
-        exec('systemctl restart dovecot 2>/dev/null', $restartOutput, $restartReturn);
-        if ($restartReturn === 0) {
-            echo "✅ Restarted Dovecot successfully\n";
+        // Restart Dovecot to apply changes (skip in Docker)
+        $isDocker = Database::isDocker();
+        if (!$isDocker) {
+            exec('systemctl restart dovecot 2>/dev/null', $restartOutput, $restartReturn);
+            if ($restartReturn === 0) {
+                echo "✅ Restarted Dovecot successfully\n";
+            } else {
+                echo "❌ Dovecot restart failed, rolling back changes\n";
+                unlink($sieveConfigFile);
+                exec('systemctl restart dovecot 2>/dev/null');
+                return;
+            }
         } else {
-            echo "❌ Dovecot restart failed, rolling back changes\n";
-            unlink($sieveConfigFile);
-            exec('systemctl restart dovecot 2>/dev/null');
-            return;
+            echo "ℹ️ Skipping Dovecot restart in Docker environment\n";
         }
         
         // Verify Dovecot is running without errors
@@ -1667,8 +1631,13 @@ DOVECOT;
         file_put_contents($mainConfig, $content);
         echo "✅ Configured Postfix for dovecot-lda: $ldaPath\n";
         
-        exec('systemctl reload postfix 2>/dev/null');
-        echo "✅ Postfix reloaded\n";
+        $isDocker = Database::isDocker();
+        if (!$isDocker) {
+            exec('systemctl reload postfix 2>/dev/null');
+            echo "✅ Postfix reloaded\n";
+        } else {
+            echo "ℹ️ Skipping Postfix reload in Docker environment\n";
+        }
     }
     
     /**
@@ -1744,11 +1713,14 @@ DOVECOT;
             echo "✅ Dovecot Sieve is already installed\n";
         }
         
-        // Start Dovecot if not running
-        exec('systemctl is-active dovecot 2>/dev/null', $output, $returnCode);
-        if ($returnCode !== 0) {
-            echo "🚀 Starting Dovecot...\n";
-            exec('systemctl enable dovecot && systemctl start dovecot 2>/dev/null');
+        // Start Dovecot if not running (skip in Docker)
+        $isDocker = Database::isDocker();
+        if (!$isDocker) {
+            exec('systemctl is-active dovecot 2>/dev/null', $output, $returnCode);
+            if ($returnCode !== 0) {
+                echo "🚀 Starting Dovecot...\n";
+                exec('systemctl enable dovecot && systemctl start dovecot 2>/dev/null');
+            }
         }
     }
     
@@ -1784,9 +1756,12 @@ DOVECOT;
     {
         echo "🔧 Aggressively fixing all Dovecot permission issues...\n";
         
-        // Stop dovecot first
-        exec('systemctl stop dovecot 2>/dev/null');
-        echo "⏹️  Stopped Dovecot\n";
+        // Stop dovecot first (skip in Docker)
+        $isDocker = Database::isDocker();
+        if (!$isDocker) {
+            exec('systemctl stop dovecot 2>/dev/null');
+            echo "⏹️  Stopped Dovecot\n";
+        }
         
         // Fix all log files and directories
         $commands = [
@@ -1804,9 +1779,11 @@ DOVECOT;
         }
         echo "✅ Fixed all log file permissions (777)\n";
         
-        // Start dovecot
-        exec('systemctl start dovecot 2>/dev/null');
-        echo "▶️  Started Dovecot\n";
+        // Start dovecot (skip in Docker)
+        if (!$isDocker) {
+            exec('systemctl start dovecot 2>/dev/null');
+            echo "▶️  Started Dovecot\n";
+        }
         
         // Wait and fix runtime permissions
         sleep(3);
@@ -1961,9 +1938,12 @@ BASH;
         exec('find /var/log -name "*dovecot*" -o -name "*dovcot*" | xargs chown dovecot:mail 2>/dev/null');
         exec('find /var/log -name "*dovecot*" -o -name "*dovcot*" | xargs chmod 666 2>/dev/null');
         
-        // Restart dovecot to apply permission changes
-        exec('systemctl restart dovecot 2>/dev/null');
-        echo "✅ Restarted Dovecot to apply permissions\n";
+        // Restart dovecot to apply permission changes (skip in Docker)
+        $isDocker = Database::isDocker();
+        if (!$isDocker) {
+            exec('systemctl restart dovecot 2>/dev/null');
+            echo "✅ Restarted Dovecot to apply permissions\n";
+        }
         
         // Wait for dovecot to start and fix runtime permissions
         sleep(2);
@@ -2100,9 +2080,12 @@ BASH;
             }
         }
         
-        // Reload Dovecot to pick up changes
-        exec("systemctl reload dovecot 2>/dev/null");
-        echo "  🔄 Reloaded Dovecot configuration\n";
+        // Reload Dovecot to pick up changes (skip in Docker)
+        $isDocker = Database::isDocker();
+        if (!$isDocker) {
+            exec("systemctl reload dovecot 2>/dev/null");
+            echo "  🔄 Reloaded Dovecot configuration\n";
+        }
     }
     
     /**
