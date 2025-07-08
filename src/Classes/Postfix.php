@@ -1387,18 +1387,30 @@ EOF;
 
         // Initialize threat detectors if needed
         if (empty($this->threatDetectors)) {
+            $logger->info("Initializing threat detectors...");
             $this->initializeThreatDetectors();
+            $logger->info("Initialized " . count($this->threatDetectors) . " threat detectors");
         }
+
+        // Log that we're starting threat detection
+        $logger->info("Starting dynamic threat detection process");
 
         // Run all threat detectors
         foreach ($this->threatDetectors as $category => $detector) {
+            $logger->info("Running {$category} threat detector...");
             $result = $detector->analyze($headers, $body);
             $this->lastThreatResults[$category] = $result;
+
+            $logger->info("{$category} detection result: " . ($result['is_threat'] ? "THREAT DETECTED" : "Clean"), [
+                'matches' => $result['matches'] ?? [],
+                'score' => $result['score'] ?? 0
+            ]);
 
             if ($result['is_threat']) {
                 $isThreat = true;
             }
         }
+
 
         return $isThreat;
     }

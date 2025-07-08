@@ -25,11 +25,27 @@ abstract class BaseThreatDetector
     protected function getAlgorithms(): array
     {
         $cacheKey = "algorithms_$this->category";
-        
+
         if (!isset(self::$algorithmCache[$cacheKey])) {
+            $this->logger->info("Fetching detection algorithms for category: {$this->category}");
             self::$algorithmCache[$cacheKey] = $this->database->getDetectionAlgorithms($this->category);
+            $count = count(self::$algorithmCache[$cacheKey]);
+            $this->logger->info("Retrieved {$count} algorithms for {$this->category}");
+
+            // Log the details of each algorithm for debugging
+            if ($count > 0) {
+                foreach (self::$algorithmCache[$cacheKey] as $index => $algorithm) {
+                    $this->logger->info("Algorithm #{$index}: {$algorithm['name']}", [
+                        'type' => $algorithm['detection_type'],
+                        'pattern' => $algorithm['pattern'],
+                        'target' => $algorithm['target']
+                    ]);
+                }
+            } else {
+                $this->logger->warning("No algorithms found for {$this->category} - threat detection will be ineffective");
+            }
         }
-        $this->logger->info("Retrieved Algorithems" ,  self::$algorithmCache[$cacheKey]);
+
         return self::$algorithmCache[$cacheKey];
     }
     

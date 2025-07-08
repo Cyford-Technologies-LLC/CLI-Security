@@ -3,6 +3,7 @@ namespace Cyford\Security\Classes\ThreatCategory;
 
 use Cyford\Security\Classes\Database;
 
+
 class Spam extends BaseThreatDetector
 {
     protected string $category = 'spam';
