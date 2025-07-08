@@ -207,12 +207,19 @@ class Postfix
             if ($isSpam) {
 //                $spamReason = $spamFilter->getLastSpamReason() ?? 'Local spam filter detection';
                 $logger->info("Local spam filter flagged email: $spamReason");
+
+                $this->handleSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
+                return;
+
+
             }
             else {
                 $logger->info("Local spam filter: email is clean");
 
                 // Only check API if local filter didn't detect spam
-                if (($this->config['api']['check_spam_against_server'] ?? false)) {
+
+// Only check API if local filter didn't detect spam
+                if (($this->config['api']['check_spam_against_server'] ?? true)) {
                     $logger->info("No local spam detected, checking with API...");
                     try {
                         $apiClient = $this->getApiClient($logger);
@@ -227,11 +234,65 @@ class Postfix
                         }
 
                         $logger->info("DEBUG: Checking config values...");
-                        // Continue with API spam check logic here
+
+                        // This is the missing part that actually calls the API for spam checking
+                        $response = $apiClient->analyzeSpam(
+                            $headers['From'] ,
+                            $body,
+                            $headers,
+                            [
+                                'ip' => $_SERVER['REMOTE_ADDR'] ,
+                                'to_email' => $recipient,
+                                'hostname' => gethostname(),
+                                'threshold' => $this->config['api']['spam_threshold'] ?? 70
+                            ]
+                        );
+
+                        $logger->info("DEBUG: API response received: " . json_encode($response));
+
+                        // Process the API response
+                        if ($response['status_code'] === 200) {
+                            $apiResult = $response['response'];
+
+                            if ($apiResult['is_spam'] ?? false) {
+                                $isSpam = true;
+                                $spamReason = 'API spam detection: ' . ($apiResult['reason'] ?? 'Unknown');
+                                $logger->info("API flagged email as spam: $spamReason");
+
+                                $this->handleSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
+                                return;
+                            } else {
+                                $logger->info("API confirmed email is clean");
+
+                                // Process clean email (add footer if configured)
+                                if ($this->config['postfix']['spam_handling']['add_footer'] ?? false) {
+                                    $emailData = $this->addFooter($emailData);
+                                }
+
+                                // Deliver the clean email
+                                $this->requeueEmail($emailData, $recipient);
+                                return;
+                            }
+                        } else {
+                            $logger->warning("API returned non-200 status: " . $response['status_code']);
+                        }
                     } catch (Exception $e) {
                         $logger->error("API spam check failed: " . $e->getMessage());
+                        // Continue processing even if API check fails
                     }
                 }
+
+// If we get here, process as clean (API check failed or disabled)
+                $logger->info("Processing as clean email (default path)");
+                if ($this->config['postfix']['spam_handling']['add_footer'] ?? false) {
+                    $emailData = $this->addFooter($emailData);
+                }
+                $this->requeueEmail($emailData, $recipient);
+
+
+
+
+
             }
         }
 
@@ -709,6 +770,16 @@ EOF;
     private function handleSpamEmail(string $emailData, array $headers, string $recipient, string $spamReason, $logger): void
     {
         global $config;
+
+
+        // Add spam headers if configured
+        if ($config['postfix']['spam_handling']['add_spam_headers'] ?? true) {
+            $emailData = $this->addSpamHeaders($emailData, $spamReason, $logger);
+        }
+
+        // Add footer to spam email if configured
+        $emailData = $this->addFooterIfConfigured($emailData, true);
+
 
         // Check spam handling method FIRST
         $spamHandlingMethod = $config['postfix']['spam_handling_method'] ?? 'maildir';
