@@ -127,6 +127,12 @@ class Postfix
         [$headers, $body] = $this->parseEmail($emailData);
         $logger->info("Parsed headers: " . json_encode($headers, JSON_THROW_ON_ERROR));
 
+
+        // Extract sender IP after parsing
+        $senderIp = $this->extractSenderIp($headers, $headers);
+        $this->logger->info("Sender IP: " . ($senderIp ?: 'Not found'));
+
+
         // Skip system/security emails to prevent loops
         if ($this->shouldSkipEmail($headers, $logger)) {
             exit(0);
@@ -241,7 +247,7 @@ class Postfix
                             $body,
                             $headers,
                             [
-                                'ip' => $_SERVER['REMOTE_ADDR'] ,
+                                'ip' => $senderIp ?? $_SERVER['REMOTE_ADDR'] ,
                                 'to_email' => $recipient,
                                 'hostname' => gethostname(),
                                 'threshold' => $this->config['api']['spam_threshold'] ?? 70
@@ -1544,4 +1550,94 @@ EOF;
 
 
 
+    /**
+     * Extract the sender IP from email headers
+     *
+     * @param array $headers Parsed email headers
+     * @param string $rawHeaderText Optional raw header text for backup extraction
+     * @return string|null The sender IP or null if not found
+     */
+    private function extractSenderIp(array $headers, string $rawHeaderText = ''): ?string
+    {
+        // Pattern to extract IP addresses
+        $ipPattern = '/\[?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]?/';
+
+        // Try Received headers first - they usually contain the original IP
+        if (isset($headers['Received'])) {
+            $receivedValue = $headers['Received'];
+
+            // If there are multiple received headers, they might be concatenated
+            $receivedHeaders = explode('Received:', $receivedValue);
+
+            foreach ($receivedHeaders as $received) {
+                if (preg_match($ipPattern, $received, $matches)) {
+                    $ip = $matches[1];
+
+                    // Skip private/local IPs
+                    if (!$this->isPrivateIp($ip)) {
+                        return $ip;
+                    }
+                }
+            }
+        }
+
+        // Try X-Originating-IP header
+        if (isset($headers['X-Originating-IP']) &&
+            preg_match($ipPattern, $headers['X-Originating-IP'], $matches)) {
+            return $matches[1];
+        }
+
+        // Try X-Sender-IP header
+        if (isset($headers['X-Sender-IP'])) {
+            return $headers['X-Sender-IP'];
+        }
+
+        // Last attempt - try to find IPs in Authentication-Results
+        if (isset($headers['Authentication-Results']) &&
+            preg_match('/client-ip=(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/',
+                $headers['Authentication-Results'], $matches)) {
+            return $matches[1];
+        }
+
+        // If all else fails and we have raw headers, scan them directly
+        if (!empty($rawHeaderText)) {
+            if (preg_match_all($ipPattern, $rawHeaderText, $matches)) {
+                foreach ($matches[1] as $ip) {
+                    if (!$this->isPrivateIp($ip)) {
+                        return $ip;
+                    }
+                }
+            }
+        }
+
+        // No valid IP found
+        return null;
+    }
+
+    /**
+     * Check if an IP is a private/local address
+     *
+     * @param string $ip The IP address to check
+     * @return bool True if the IP is private/local
+     */
+    private function isPrivateIp(string $ip): bool
+    {
+        // Check for localhost
+        if ($ip === '127.0.0.1' || $ip === '::1') {
+            return true;
+        }
+
+        // Convert IP to long integer
+        $long = ip2long($ip);
+        if ($long === false) {
+            return false;
+        }
+
+        // Check private IP ranges
+        return (
+            ($long >= ip2long('10.0.0.0') && $long <= ip2long('10.255.255.255')) ||
+            ($long >= ip2long('172.16.0.0') && $long <= ip2long('172.31.255.255')) ||
+            ($long >= ip2long('192.168.0.0') && $long <= ip2long('192.168.255.255'))
+        );
+    }
 }
