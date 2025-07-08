@@ -8,8 +8,7 @@ use Cyford\Security\Classes\ThreatCategory\Spam;
 use Cyford\Security\Classes\ThreatCategory\Phishing;
 use Cyford\Security\Classes\ThreatCategory\Malware;
 use Cyford\Security\Classes\ThreatCategory\Virus;
-
-
+use Cyford\Security\Classes\Logger;
 
 class Postfix
 {
@@ -26,7 +25,7 @@ class Postfix
     // Add these new properties at the top with your other properties
     private array $threatDetectors = [];
     private array $lastThreatResults = [];
-
+    protected Logger $logger;
 
 
     public function __construct(array $config, ?Systems $systems = null)
@@ -38,6 +37,7 @@ class Postfix
         $this->backupDirectory = $config['postfix']['backup_directory'] ?? '/var/backups/postfix';
         $this->allowFileModification = $config['postfix']['allow_modification'] ?? false;
         $this->systems = $systems ?? new Systems();
+        $this->logger = new Logger($config);
         
         // Initialize database if hash detection is enabled
         if ($config['postfix']['spam_handling']['hash_detection'] ?? false) {
@@ -73,7 +73,7 @@ class Postfix
     private function getApiClient($logger): ApiClient
     {
         if ($this->apiClient === null) {
-            $this->apiClient = new ApiClient($this->config, $logger);
+            $this->apiClient = new ApiClient($this->config, $this->logger);
         }
         return $this->apiClient;
     }
@@ -1387,21 +1387,21 @@ EOF;
 
         // Initialize threat detectors if needed
         if (empty($this->threatDetectors)) {
-            $logger->info("Initializing threat detectors...");
+            $this->logger->info("Initializing threat detectors...");
             $this->initializeThreatDetectors();
-            $logger->info("Initialized " . count($this->threatDetectors) . " threat detectors");
+            $this->logger->info("Initialized " . count($this->threatDetectors) . " threat detectors");
         }
 
         // Log that we're starting threat detection
-        $logger->info("Starting dynamic threat detection process");
+        $this->logger->info("Starting dynamic threat detection process");
 
         // Run all threat detectors
         foreach ($this->threatDetectors as $category => $detector) {
-            $logger->info("Running {$category} threat detector...");
+            $this->logger->info("Running {$category} threat detector...");
             $result = $detector->analyze($headers, $body);
             $this->lastThreatResults[$category] = $result;
 
-            $logger->info("{$category} detection result: " . ($result['is_threat'] ? "THREAT DETECTED" : "Clean"), [
+            $this->logger->info("{$category} detection result: " . ($result['is_threat'] ? "THREAT DETECTED" : "Clean"), [
                 'matches' => $result['matches'] ?? [],
                 'score' => $result['score'] ?? 0
             ]);
