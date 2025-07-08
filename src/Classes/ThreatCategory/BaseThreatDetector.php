@@ -66,21 +66,61 @@ abstract class BaseThreatDetector
         $target = $algorithm['target'];
         $pattern = $algorithm['pattern'];
         $type = $algorithm['detection_type'];
-        
+        $algorithmName = $algorithm['name'] ?? 'unnamed';  // Add this line to define $algorithmName
+
+
         // Get content to check based on target
         $content = $this->getTargetContent($target, $headers, $body);
         
         // Execute based on detection type
         switch ($type) {
             case 'keyword':
-                return stripos($content, $pattern) !== false;
-                
-            case 'regex':
-//                return preg_match($pattern, $content);
-                if (strlen($pattern) < 2 || !in_array($pattern[0], ['/', '#', '~', '@', '%']) || $pattern[0] !== $pattern[strlen($pattern) - 1]) {
-                    $pattern = '/' . str_replace('/', '\/', $pattern) . '/i';
+                // Exact match check first
+                if (stripos($content, $pattern) !== false) {
+                    $this->logger->info("Exact keyword match found: '$pattern'");
+                    return true;
                 }
-                return (bool)preg_match($pattern, $content);
+
+                // If not found, try a more flexible approach for spam patterns
+                // Split pattern into words and check if all words exist in content
+                $patternWords = explode(' ', strtolower($pattern));
+                $contentLower = strtolower($content);
+                $allWordsFound = true;
+
+                foreach ($patternWords as $word) {
+                    if (strlen($word) > 3 && stripos($contentLower, $word) === false) {
+                        $allWordsFound = false;
+                        break;
+                    }
+                }
+
+                if ($allWordsFound && count($patternWords) > 1) {
+                    $this->logger->info("Partial keyword match found for pattern: '$pattern'");
+                    return true;
+                }
+
+                return false;
+
+
+            case 'regex':
+                // Format regex pattern if needed
+                if (strlen($pattern) < 2 || !in_array($pattern[0], ['/', '#', '~', '@', '%']) || $pattern[0] !== $pattern[strlen($pattern) - 1]) {
+                    $formattedPattern = '/' . str_replace('/', '\/', $pattern) . '/i';
+                    $this->logger->info("Reformatted regex pattern: $formattedPattern");
+                    $pattern = $formattedPattern;
+                }
+
+                try {
+                    $result = (bool)preg_match($pattern, $content);
+                    $this->logger->info("Regex check result: " . ($result ? "MATCH" : "no match"));
+                    return $result;
+                } catch (\Exception $e) {
+                    $this->logger->error("Invalid regex pattern in algorithm $algorithmName: " . $e->getMessage(), [
+                        'pattern' => $pattern
+                    ]);
+                    return false;
+                }
+
 
 
             case 'domain':
