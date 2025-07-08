@@ -57,8 +57,13 @@ abstract class BaseThreatDetector
                 return stripos($content, $pattern) !== false;
                 
             case 'regex':
-                return preg_match($pattern, $content);
-                
+//                return preg_match($pattern, $content);
+                if (strlen($pattern) < 2 || !in_array($pattern[0], ['/', '#', '~', '@', '%']) || $pattern[0] !== $pattern[strlen($pattern) - 1]) {
+                    $pattern = '/' . str_replace('/', '\/', $pattern) . '/i';
+                }
+                return (bool)preg_match($pattern, $content);
+
+
             case 'domain':
                 return $this->checkDomain($content, $pattern);
                 
