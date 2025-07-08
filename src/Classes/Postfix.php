@@ -728,8 +728,9 @@ EOF;
 
         // Check spam handling method FIRST
         $spamHandlingMethod = $config['postfix']['spam_handling_method'] ?? 'maildir';
+
         if ($spamHandlingMethod === 'maildir') {
-            $logger->info("Using maildir / cron  spam handling method");
+            $logger->info("Using maildir / cron spam handling method");
             $this->deliverSpamToMaildir($emailData, $recipient, $logger);
             return;
         }
@@ -1124,39 +1125,39 @@ EOF;
     /**
      * Send spam data to API if configured
      */
-    private function sendSpamToAPI(string $subject, string $body, array $headers, $logger): void
-    {
-        global $config;
-        
-        // Check if API integration is enabled
-        if (empty($config['api']['spam_check_endpoint'])) {
-            return;
-        }
-        
-        try {
-            require_once __DIR__ . '/SpamAPI.php';
-            $spamAPI = new SpamAPI($config, 'postfix');
-            
-            // Extract client IP from headers
-            $clientIP = '';
-            if (!empty($headers['Received'])) {
-                preg_match('/\[(\d+\.\d+\.\d+\.\d+)]/', $headers['Received'], $matches);
-                $clientIP = $matches[1] ?? '';
-            }
-            
-            // Send spam data only if new (include headers for full context)
-            $wasSent = $spamAPI->sendSpamDataIfNew($subject, $body, $clientIP, $headers);
-            
-            if ($wasSent) {
-                $logger->info("Spam data sent to Cyford Web Armor API");
-            } else {
-                $logger->info("Spam data already sent, skipping API call");
-            }
-            
-        } catch (Exception $e) {
-            $logger->warning("Failed to send spam data to API: " . $e->getMessage());
-        }
-    }
+//    private function sendSpamToAPI(string $subject, string $body, array $headers, $logger): void
+//    {
+//        global $config;
+//
+//        // Check if API integration is enabled
+//        if (empty($config['api']['spam_check_endpoint'])) {
+//            return;
+//        }
+//
+//        try {
+//            require_once __DIR__ . '/SpamAPI.php';
+//            $spamAPI = new SpamAPI($config, 'postfix');
+//
+//            // Extract client IP from headers
+//            $clientIP = '';
+//            if (!empty($headers['Received'])) {
+//                preg_match('/\[(\d+\.\d+\.\d+\.\d+)]/', $headers['Received'], $matches);
+//                $clientIP = $matches[1] ?? '';
+//            }
+//
+//            // Send spam data only if new (include headers for full context)
+//            $wasSent = $spamAPI->sendSpamDataIfNew($subject, $body, $clientIP, $headers);
+//
+//            if ($wasSent) {
+//                $logger->info("Spam data sent to Cyford Web Armor API");
+//            } else {
+//                $logger->info("Spam data already sent, skipping API call");
+//            }
+//
+//        } catch (Exception $e) {
+//            $logger->warning("Failed to send spam data to API: " . $e->getMessage());
+//        }
+//    }
 
     /**
      * Handle system errors according to configuration
