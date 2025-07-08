@@ -2,17 +2,20 @@
 namespace Cyford\Security\Classes\ThreatCategory;
 
 use Cyford\Security\Classes\Database;
+use Cyford\Security\Classes\Logger;
 
 abstract class BaseThreatDetector
 {
     protected array $config;
     protected Database $database;
+    protected Logger $logger;
     protected string $category;
     private static array $algorithmCache = [];
     
     public function __construct(array $config)
     {
         $this->config = $config;
+        $this->logger = new Logger($config);
         $this->database = new Database($config);
     }
     
@@ -26,7 +29,7 @@ abstract class BaseThreatDetector
         if (!isset(self::$algorithmCache[$cacheKey])) {
             self::$algorithmCache[$cacheKey] = $this->database->getDetectionAlgorithms($this->category);
         }
-        
+        $this->logger->info("Retrieved Algorithems" ,  self::$algorithmCache[$cacheKey]);
         return self::$algorithmCache[$cacheKey];
     }
     
