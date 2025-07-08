@@ -168,7 +168,6 @@ abstract class BaseThreatDetector
 
 
 
-
     /**
      * Safely processes a regex pattern and handles potential errors
      *
@@ -182,31 +181,26 @@ abstract class BaseThreatDetector
         // Log the original pattern for debugging
         $this->logger->info("Processing regex pattern for $algorithmName: '$pattern'");
 
-        // Clean up pattern if it has quoted delimiters or other issues
-        if (preg_match('/^["\']\/(.+)\/([a-zA-Z]*)["\']$/', $pattern, $matches)) {
-            // Pattern was stored with quotes and delimiters, extract just the pattern and modifiers
-            $pattern = '/' . $matches[1] . '/' . $matches[2];
-            $this->logger->info("Extracted pattern from quotes: $pattern");
-        }
-        // Check if the pattern already has delimiters
-        else if (strlen($pattern) >= 2) {
-            $firstChar = $pattern[0];
-            $lastChar = $pattern[strlen($pattern) - 1];
-            $validDelimiters = ['/', '#', '~', '@', '%'];
+        // The pattern might be stored with text delimiters and modifiers
+        // Common format in the database seems to be: '/pattern/i...'
 
-            // If it doesn't have valid delimiters, add them
-            if (!in_array($firstChar, $validDelimiters) || $firstChar !== $lastChar) {
-                // Handle patterns that might already have escaped delimiters
-                $cleanPattern = str_replace('/', '\/', $pattern);
-                $pattern = '/' . $cleanPattern . '/i';
-                $this->logger->info("Added delimiters to pattern: $pattern");
-            } else {
-                $this->logger->info("Using existing pattern with delimiters: $pattern");
-            }
+        // Extract the actual pattern from database format
+        if (preg_match('/^\'?\/(.+?)\/([a-zA-Z]*)\.\.\.\'?$/i', $pattern, $matches)) {
+            // This handles patterns stored like '/pattern/i...' or ''/pattern/i...''
+            $patternContent = $matches[1];
+            $modifiers = $matches[2] ?? 'i';
+
+            // Construct a proper regex pattern
+            $pattern = '/' . str_replace('/', '\/', $patternContent) . '/' . $modifiers;
+            $this->logger->info("Extracted pattern from database format: $pattern");
+        }
+        // Check if it's a regular pattern that just needs delimiters
+        else if (!preg_match('/^\/.*\/[a-zA-Z]*$/', $pattern)) {
+            // Not already a valid regex with delimiters, add them
+            $pattern = '/' . str_replace('/', '\/', $pattern) . '/i';
+            $this->logger->info("Added delimiters to pattern: $pattern");
         } else {
-            // Pattern is too short, just add delimiters
-            $pattern = '/' . $pattern . '/i';
-            $this->logger->info("Added delimiters to short pattern: $pattern");
+            $this->logger->info("Using existing pattern: $pattern");
         }
 
         // Safely execute the regex
@@ -216,13 +210,16 @@ abstract class BaseThreatDetector
             return $result;
         } catch (\Exception $e) {
             $this->logger->error("Invalid regex pattern in algorithm $algorithmName: " . $e->getMessage(), [
-                'pattern' => $pattern
+                'pattern' => $pattern,
+                'original' => $algorithm['pattern'] ?? 'unknown'
             ]);
-            return false;
+
+            // As a fallback, try a simple substring match
+            $simpleMatch = stripos($content, trim(preg_replace('/[\/\\\\\(\)\[\]\{\}\^\$\*\+\?\.\|\-]/', '', $pattern))) !== false;
+            $this->logger->info("Falling back to simple text match: " . ($simpleMatch ? "MATCH" : "no match"));
+            return $simpleMatch;
         }
     }
-
-
 
 
     /**
