@@ -75,63 +75,11 @@ abstract class BaseThreatDetector
         // Execute based on detection type
         switch ($type) {
             case 'keyword':
-                // Exact match check first
-                if (stripos($content, $pattern) !== false) {
-                    $this->logger->info("Exact keyword match found: '$pattern'");
-                    return true;
-                }
-
-                // If not found, try a more flexible approach for spam patterns
-                // Split pattern into words and check if all words exist in content
-                $patternWords = explode(' ', strtolower($pattern));
-                $contentLower = strtolower($content);
-                $allWordsFound = true;
-
-                foreach ($patternWords as $word) {
-                    if (strlen($word) > 3 && stripos($contentLower, $word) === false) {
-                        $allWordsFound = false;
-                        break;
-                    }
-                }
-
-                if ($allWordsFound && count($patternWords) > 1) {
-                    $this->logger->info("Partial keyword match found for pattern: '$pattern'");
-                    return true;
-                }
-
-                return false;
-
+                return $this->processKeywordPattern($pattern, $content, $algorithmName);
 
             case 'regex':
                 // Check if the pattern already has delimiters
-                $hasDelimiters = false;
-                if (strlen($pattern) >= 2) {
-                    $firstChar = $pattern[0];
-                    $lastChar = $pattern[strlen($pattern) - 1];
-                    $hasDelimiters = in_array($firstChar, ['/', '#', '~', '@', '%']) && $firstChar === $lastChar;
-                }
-
-                // Only format if it doesn't already have proper delimiters
-                if (!$hasDelimiters) {
-                    // Don't include the existing pattern's slashes in the formatted pattern
-                    $cleanPattern = str_replace('/', '\/', $pattern);
-                    $pattern = '/' . $cleanPattern . '/i';
-                    $this->logger->info("Reformatted regex pattern: $pattern");
-                }
-
-                try {
-                    $result = (bool)preg_match($pattern, $content);
-                    $this->logger->info("Regex check result: " . ($result ? "MATCH" : "no match"));
-                    return $result;
-                } catch (\Exception $e) {
-                    $this->logger->error("Invalid regex pattern in algorithm $algorithmName: " . $e->getMessage(), [
-                        'pattern' => $pattern
-                    ]);
-                    return false;
-                }
-
-
-
+                return $this->processRegexPattern($pattern, $content, $algorithmName);
 
             case 'domain':
                 return $this->checkDomain($content, $pattern);
@@ -214,4 +162,125 @@ abstract class BaseThreatDetector
      * Abstract method for threat analysis
      */
     abstract public function analyze(array $headers, string $body): array;
+
+
+
+
+
+
+
+    /**
+     * Safely processes a regex pattern and handles potential errors
+     *
+     * @param string $pattern The pattern to process
+     * @param string $content The content to check against
+     * @param string $algorithmName Name of the algorithm for logging
+     * @return bool True if pattern matches content
+     */
+    protected function processRegexPattern(string $pattern, string $content, string $algorithmName): bool
+    {
+        // Log the original pattern for debugging
+        $this->logger->info("Processing regex pattern for $algorithmName: '$pattern'");
+
+        // Clean up pattern if it has quoted delimiters or other issues
+        if (preg_match('/^["\']\/(.+)\/([a-zA-Z]*)["\']$/', $pattern, $matches)) {
+            // Pattern was stored with quotes and delimiters, extract just the pattern and modifiers
+            $pattern = '/' . $matches[1] . '/' . $matches[2];
+            $this->logger->info("Extracted pattern from quotes: $pattern");
+        }
+        // Check if the pattern already has delimiters
+        else if (strlen($pattern) >= 2) {
+            $firstChar = $pattern[0];
+            $lastChar = $pattern[strlen($pattern) - 1];
+            $validDelimiters = ['/', '#', '~', '@', '%'];
+
+            // If it doesn't have valid delimiters, add them
+            if (!in_array($firstChar, $validDelimiters) || $firstChar !== $lastChar) {
+                // Handle patterns that might already have escaped delimiters
+                $cleanPattern = str_replace('/', '\/', $pattern);
+                $pattern = '/' . $cleanPattern . '/i';
+                $this->logger->info("Added delimiters to pattern: $pattern");
+            } else {
+                $this->logger->info("Using existing pattern with delimiters: $pattern");
+            }
+        } else {
+            // Pattern is too short, just add delimiters
+            $pattern = '/' . $pattern . '/i';
+            $this->logger->info("Added delimiters to short pattern: $pattern");
+        }
+
+        // Safely execute the regex
+        try {
+            $result = (bool)preg_match($pattern, $content);
+            $this->logger->info("Regex check result: " . ($result ? "MATCH" : "no match"));
+            return $result;
+        } catch (\Exception $e) {
+            $this->logger->error("Invalid regex pattern in algorithm $algorithmName: " . $e->getMessage(), [
+                'pattern' => $pattern
+            ]);
+            return false;
+        }
+    }
+
+
+
+
+    /**
+     * Process a keyword pattern against content with both exact and partial matching
+     *
+     * @param string $pattern The keyword pattern to check
+     * @param string $content The content to check against
+     * @param string $algorithmName Name of the algorithm for logging
+     * @return bool True if pattern matches content
+     */
+    protected function processKeywordPattern(string $pattern, string $content, string $algorithmName): bool
+    {
+        // First try exact match (case-insensitive)
+        if (stripos($content, $pattern) !== false) {
+            $this->logger->info("Exact keyword match found for '$algorithmName': '$pattern'");
+            return true;
+        }
+
+        // If exact match fails, try a more flexible approach for multi-word patterns
+        $patternWords = explode(' ', strtolower($pattern));
+
+        // Only proceed with partial matching if there are multiple words
+        if (count($patternWords) <= 1) {
+            return false;
+        }
+
+        $contentLower = strtolower($content);
+        $allWordsFound = true;
+        $matchedWords = [];
+
+        // Check if all significant words (longer than 3 chars) exist in the content
+        foreach ($patternWords as $word) {
+            if (strlen($word) > 3) {
+                if (stripos($contentLower, $word) === false) {
+                    $allWordsFound = false;
+                    break;
+                } else {
+                    $matchedWords[] = $word;
+                }
+            }
+        }
+
+        // Only consider it a match if all significant words were found
+        if ($allWordsFound && !empty($matchedWords)) {
+            $this->logger->info("Partial keyword match found for '$algorithmName': '" .
+                implode(', ', $matchedWords) . "' from pattern '$pattern'");
+            return true;
+        }
+
+        return false;
+    }
+
+
+
+
+
+
+
+
+
 }
