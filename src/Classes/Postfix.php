@@ -246,15 +246,7 @@ class Postfix
             // Add footer to spam email if configured
             $emailData = $this->addFooterIfConfigured($emailData, true);
 
-            // Check spam handling method FIRST
-            $spamHandlingMethod = $config['postfix']['spam_handling_method'] ?? 'requeue';
-            if ($spamHandlingMethod === 'maildir') {
-                $logger->info("Using maildir spam handling method");
-                $this->deliverSpamToMaildir($emailData, $recipient, $logger);
-                return;
-            }
 
-            $logger->info("Using standard spam handling method: $spamHandlingMethod");
             $this->handleSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
             return;
         }
@@ -733,6 +725,15 @@ EOF;
     private function handleSpamEmail(string $emailData, array $headers, string $recipient, string $spamReason, $logger): void
     {
         global $config;
+
+        // Check spam handling method FIRST
+        $spamHandlingMethod = $config['postfix']['spam_handling_method'] ?? 'maildir';
+        if ($spamHandlingMethod === 'maildir') {
+            $logger->info("Using maildir / cron  spam handling method");
+            $this->deliverSpamToMaildir($emailData, $recipient, $logger);
+            return;
+        }
+
         $spamAction = $config['postfix']['spam_handling']['action'] ?? 'reject';
         
         switch ($spamAction) {
