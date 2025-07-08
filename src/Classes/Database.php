@@ -316,16 +316,10 @@ class Database
         if ($version !== 1) {
             throw new RuntimeException("Unsupported hash version: $version");
         }
+
         
-        $primaryKeyPath = $this->config['hash']['primary_key_path'] ?? '/etc/cyford-security/keys/primary.key';
-        $secondaryKeyPath = $this->config['hash']['secondary_key_path'] ?? '/etc/cyford-security/keys/secondary.key';
-        
-        if (!file_exists($primaryKeyPath) || !file_exists($secondaryKeyPath)) {
-            throw new RuntimeException("Hash key files not found. Please ensure keys exist at: $primaryKeyPath and $secondaryKeyPath");
-        }
-        
-        $primaryKey = trim(file_get_contents($primaryKeyPath));
-        $secondaryKey = trim(file_get_contents($secondaryKeyPath));
+        $primaryKey = 'CYFORD_SECURITY_CLI_2025';
+        $secondaryKey = 'CYFORD_WEB_ARMOR_2025';
         
         // Clean content
         $cleanSubject = trim(strtolower($subject));
