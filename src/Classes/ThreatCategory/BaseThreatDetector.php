@@ -103,11 +103,20 @@ abstract class BaseThreatDetector
 
 
             case 'regex':
-                // Format regex pattern if needed
-                if (strlen($pattern) < 2 || !in_array($pattern[0], ['/', '#', '~', '@', '%']) || $pattern[0] !== $pattern[strlen($pattern) - 1]) {
-                    $formattedPattern = '/' . str_replace('/', '\/', $pattern) . '/i';
-                    $this->logger->info("Reformatted regex pattern: $formattedPattern");
-                    $pattern = $formattedPattern;
+                // Check if the pattern already has delimiters
+                $hasDelimiters = false;
+                if (strlen($pattern) >= 2) {
+                    $firstChar = $pattern[0];
+                    $lastChar = $pattern[strlen($pattern) - 1];
+                    $hasDelimiters = in_array($firstChar, ['/', '#', '~', '@', '%']) && $firstChar === $lastChar;
+                }
+
+                // Only format if it doesn't already have proper delimiters
+                if (!$hasDelimiters) {
+                    // Don't include the existing pattern's slashes in the formatted pattern
+                    $cleanPattern = str_replace('/', '\/', $pattern);
+                    $pattern = '/' . $cleanPattern . '/i';
+                    $this->logger->info("Reformatted regex pattern: $pattern");
                 }
 
                 try {
@@ -120,6 +129,7 @@ abstract class BaseThreatDetector
                     ]);
                     return false;
                 }
+
 
 
 
