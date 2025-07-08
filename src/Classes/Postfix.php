@@ -4,6 +4,12 @@ namespace Cyford\Security\Classes;
 use Exception;
 use InvalidArgumentException;
 use RuntimeException;
+use Cyford\Security\Classes\ThreatCategory\Spam;
+use Cyford\Security\Classes\ThreatCategory\Phishing;
+use Cyford\Security\Classes\ThreatCategory\Malware;
+use Cyford\Security\Classes\ThreatCategory\Virus;
+
+
 
 class Postfix
 {
@@ -16,6 +22,12 @@ class Postfix
     private array $config;
     private ?Database $database = null;
     private ?ApiClient $apiClient = null;
+
+    // Add these new properties at the top with your other properties
+    private array $threatDetectors = [];
+    private array $lastThreatResults = [];
+
+
 
     public function __construct(array $config, ?Systems $systems = null)
     {
@@ -164,19 +176,39 @@ class Postfix
             } catch (Exception $e) {
                 $logger->warning("Database unavailable, skipping hash detection: " . $e->getMessage());
             }
-        } else {
+        }
+        else {
             $logger->info("Hash detection is disabled");
         }
 
         // If not caught by hash, check with spam filter
+// If not caught by hash, check with spam filter
         if (!$skipSpamFilter) {
+
+            // NEW CODE STARTS HERE - check for all threats after the standard spam check
+            if ($this->config['postfix']['spam_handling']['threat_detection']['enabled'] ?? false) {
+                $logger->info("Running dynamic threat detection check...");
+                $isThreat = $this->checkAllThreats($headers, $body);
+
+                if ($isThreat) {
+                    $isSpam = true; // Mark as spam if any threat is detected
+                    $spamReason = "Dynamic threat detection: " . $this->getLastThreatReasons();
+                    $logger->info("Dynamic threat detection flagged email: $spamReason");
+                }
+                else {
+                    $isSpam = false;
+                    $logger->info("Dynamic threat detection: email is clean");
+                }
+            }
+
             // Check LOCAL spam filter FIRST
-            $logger->info("Running local spam filter check first...");
-            $isSpam = $spamFilter->isSpam($headers, $body);
+//            $logger->info("Running local spam filter check first...");
+//            $isSpam = $spamFilter->isSpam($headers, $body);
             if ($isSpam) {
-                $spamReason = $spamFilter->getLastSpamReason() ?? 'Local spam filter detection';
+//                $spamReason = $spamFilter->getLastSpamReason() ?? 'Local spam filter detection';
                 $logger->info("Local spam filter flagged email: $spamReason");
-            } else {
+            }
+            else {
                 $logger->info("Local spam filter: email is clean");
 
                 // Only check API if local filter didn't detect spam
@@ -201,54 +233,6 @@ class Postfix
                     }
                 }
             }
-        }
-
-        // Record hash pattern for future detection
-        if ($this->database !== null && !$skipSpamFilter) {
-            try {
-                $this->database->recordEmailHash($subject, $body, $isSpam);
-                $logger->info("Email hash recorded as " . ($isSpam ? 'spam' : 'clean') . " for future detection");
-            } catch (Exception $e) {
-                $logger->warning("Failed to record email hash: " . $e->getMessage());
-            }
-        }
-
-        if ($isSpam) {
-            $logger->warning("Email flagged as spam. Reason: $spamReason");
-
-            // Report spam to server if enabled
-            if ($this->config['api']['report_spam_to_server'] ?? true) {
-                try {
-                    $apiClient = $this->getApiClient($logger);
-                    $apiClient->login();
-                    $reportData = [
-                        'email' => $headers['From'] ?? '',
-                        'content' => $subject . "\n\n" . $body
-                    ];
-                    $logger->info("Reporting spam to server - from: " . ($headers['From'] ?? 'unknown'));
-
-                    $reportResult = $apiClient->analyzeSpam($headers['From'] ?? '', $body, $headers);
-                    $logger->info("Spam report response: " . json_encode($reportResult, JSON_THROW_ON_ERROR));
-                    $logger->info("Spam reported to server successfully");
-                } catch (Exception $e) {
-                    $logger->warning("Failed to report spam to server: " . $e->getMessage());
-                }
-            }
-
-            // Log detailed spam information
-            $this->logSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
-
-            // Add spam headers if configured
-            if ($config['postfix']['spam_handling']['add_spam_headers'] ?? true) {
-                $emailData = $this->addSpamHeaders($emailData, $spamReason, $logger);
-            }
-
-            // Add footer to spam email if configured
-            $emailData = $this->addFooterIfConfigured($emailData, true);
-
-
-            $this->handleSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
-            return;
         }
 
         $logger->info("Email is clean of spam. Proceeding with requeue.");
@@ -1394,5 +1378,87 @@ EOF;
             $logger->error("Falling back to standard requeue method");
         }
     }
+
+
+    public function checkAllThreats(array $headers, string $body): bool
+    {
+        $isThreat = false;
+        $this->lastThreatResults = [];
+
+        // Initialize threat detectors if needed
+        if (empty($this->threatDetectors)) {
+            $this->initializeThreatDetectors();
+        }
+
+        // Run all threat detectors
+        foreach ($this->threatDetectors as $category => $detector) {
+            $result = $detector->analyze($headers, $body);
+            $this->lastThreatResults[$category] = $result;
+
+            if ($result['is_threat']) {
+                $isThreat = true;
+            }
+        }
+
+        return $isThreat;
+    }
+
+    /**
+     * Initialize threat detectors
+     */
+    private function initializeThreatDetectors(): void
+    {
+        $this->threatDetectors = [
+            'spam' => new Spam($this->config),
+            'phishing' => new Phishing($this->config)
+        ];
+
+        // Optional threat detectors - only add if configured
+        if ($this->config['postfix']['threat_detection']['malware_detection'] ?? false) {
+            $this->threatDetectors['malware'] = new Malware($this->config);
+        }
+
+        if ($this->config['postfix']['threat_detection']['virus_detection'] ?? false) {
+            $this->threatDetectors['virus'] = new Virus($this->config);
+        }
+    }
+
+    /**
+     * Get reasons for the last threat detection
+     *
+     * @return string Formatted string of threat reasons
+     */
+    public function getLastThreatReasons(): string
+    {
+        $reasons = [];
+
+        foreach ($this->lastThreatResults as $category => $result) {
+            if ($result['is_threat']) {
+                $categoryReasons = [];
+                foreach ($result['matches'] as $match) {
+                    $categoryReasons[] = $match['algorithm'] . " (score: {$match['score']})";
+                }
+
+                if (!empty($categoryReasons)) {
+                    $reasons[] = ucfirst($category) . ": " . implode(', ', $categoryReasons);
+                }
+            }
+        }
+
+        return implode('; ', $reasons);
+    }
+
+    /**
+     * Get complete threat results for the last check
+     *
+     * @return array Complete threat results by category
+     */
+    public function getLastThreatResults(): array
+    {
+        return $this->lastThreatResults;
+    }
+
+
+
 
 }
