@@ -129,7 +129,7 @@ class Postfix
 
 
         // Extract sender IP after parsing
-        $senderIp = $this->extractSenderIp($headers, $headers);
+        $senderIp = $this->extractSenderIp($headers, $emailData);
         $this->logger->info("Sender IP: " . ($senderIp ?: 'Not found'));
 
 
