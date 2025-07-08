@@ -32,7 +32,7 @@ try {
             // Handle internal commands directly without full bootstrap
             require_once __DIR__ . '/src/Classes/Database.php';
             require_once __DIR__ . '/src/Classes/Internal.php';
-//            require_once __DIR__ . '/src/Classes/SpamFilter.php';
+            require_once __DIR__ . '/src/Classes/SpamFilter.php';
             require_once __DIR__ . '/src/Classes/Systems.php';
             
             $config = require __DIR__ . '/config.php';
