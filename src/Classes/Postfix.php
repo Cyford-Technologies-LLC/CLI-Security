@@ -65,6 +65,36 @@ class Postfix
         }
         return $this->apiClient;
     }
+    public function processEmail($spamFilter, $logger): void
+    {
+        $errorHandling = $this->config['postfix']['error_handling'] ?? [];
+        $onSystemError = $errorHandling['on_system_error'] ?? 'pass';
+        $maxRetries = $errorHandling['max_retries'] ?? 3;
+        $retryDelay = $errorHandling['retry_delay'] ?? 1;
+        $failSafeMode = $errorHandling['fail_safe_mode'] ?? true;
+
+        $logger->info("Processing email received from Postfix...");
+
+        // Wrap email processing in error handling
+        for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
+            try {
+                $this->processEmailInternal($spamFilter, $logger);
+                return; // Success - exit retry loop
+            } catch (Exception $e) {
+                $this->logSystemError($e, $attempt, $logger);
+
+                if ($attempt < $maxRetries) {
+                    $logger->warning("Attempt {$attempt} failed, retrying in {$retryDelay} seconds...");
+                    sleep($retryDelay);
+                    continue;
+                }
+
+                // All retries exhausted - handle according to config
+                $this->handleSystemError($e, $onSystemError, $failSafeMode, $logger);
+                return;
+            }
+        }
+    }
 
     /**
      * Internal email processing (original processEmail logic)
