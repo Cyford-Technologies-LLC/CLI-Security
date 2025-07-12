@@ -272,7 +272,7 @@ class Postfix
 
                                 // Process clean email (add footer if configured)
                                 if ($this->config['postfix']['spam_handling']['add_footer'] ?? false) {
-                                    $emailData = $this->addFooter($emailData);
+                                    $emailData = $this->addFooterIfConfigured($emailData);
                                 }
 
                                 // Deliver the clean email
@@ -291,7 +291,7 @@ class Postfix
 // If we get here, process as clean (API check failed or disabled)
                 $logger->info("Processing as clean email (default path)");
                 if ($this->config['postfix']['spam_handling']['add_footer'] ?? false) {
-                    $emailData = $this->addFooter($emailData);
+                    $emailData = $this->addFooterIfConfigured($emailData);
                 }
                 $this->requeueEmail($emailData, $recipient);
 
