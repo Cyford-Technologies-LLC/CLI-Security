@@ -276,7 +276,7 @@ class Postfix
                                 }
 
                                 // Deliver the clean email
-                                $this->requeueEmail($emailData, $recipient);
+                                $this->requeueEmail($emailData, $recipient, $logger);
                                 return;
                             }
                         } else {
@@ -293,7 +293,7 @@ class Postfix
                 if ($this->config['postfix']['spam_handling']['add_footer'] ?? false) {
                     $emailData = $this->addFooterIfConfigured($emailData);
                 }
-                $this->requeueEmail($emailData, $recipient);
+                $this->requeueEmail($emailData, $recipient , $logger);
 
 
 
