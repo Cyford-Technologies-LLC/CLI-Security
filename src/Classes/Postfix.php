@@ -282,7 +282,7 @@ class Postfix
                         $logger->info("data is array: "  . $dataResults_is_array);
 
                         if (isset($dataResults) && is_array($dataResults)) {
-                            $logger->debug("DEBUG: 'data' key exists.");
+                            $logger->info("DEBUG: 'data' key exists.");
                             if (isset($dataResults['spam_analysis']) && is_array($dataResults['spam_analysis'])) {
                                 $isSpam = $apiResult['data']['spam_analysis']['is_spam'] ?? false;
 
