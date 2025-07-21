@@ -260,16 +260,17 @@ class Postfix
                         ]
                     );
 
-                    $logger->info("DEBUG: API response received: " . json_encode($response));
+                    $logger->info("DEBUG: API response received: " , $response);
 
                     // Process the API response
                     if ($response['status_code'] === 200) {
                         $apiResult = $response['response'];
-                        $logger->info("API Results: ". $apiResult);
+                        $logger->info("API Results: " . $apiResult);
+                        $dataResults = json_decode($apiResult['data'], TRUE, 512, JSON_THROW_ON_ERROR);
 
-                        if (isset($apiResult['data']) && is_array($apiResult['data'])) {
+                        if (isset($dataResults) && is_array($dataResults)) {
                             $logger->debug("DEBUG: 'data' key exists.");
-                            if (isset($apiResult['data']['spam_analysis']) && is_array($apiResult['data']['spam_analysis'])) {
+                            if (isset($dataResults['spam_analysis']) && is_array($dataResults['spam_analysis'])) {
                                 $isSpam = $apiResult['data']['spam_analysis']['is_spam'] ?? false;
 
                                 if ($isSpam) {
