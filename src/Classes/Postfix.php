@@ -265,7 +265,7 @@ class Postfix
                     // Process the API response
                     if ($response['status_code'] === 200) {
                         $apiResult = $response['response'];
-                        $logger->info("API Results: ", $apiResult);
+                        $logger->info("API Results: ". $apiResult);
 
                         if (isset($apiResult['data']) && is_array($apiResult['data'])) {
                             $logger->debug("DEBUG: 'data' key exists.");
