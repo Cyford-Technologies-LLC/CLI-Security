@@ -271,6 +271,8 @@ class Postfix
                         $apiResult = $response['response'];
 
                         $dataResults = json_decode($apiResult['data'], TRUE, 512, JSON_THROW_ON_ERROR);
+                        $logger->info("DEBUG: API response decoded: " . json_encode($dataResults, JSON_THROW_ON_ERROR));
+
                         $dataResults_is_array = is_array($dataResults);
                         $logger->info("data is array: "  . $dataResults_is_array);
 
