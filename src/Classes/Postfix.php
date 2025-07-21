@@ -212,6 +212,12 @@ class Postfix
 //            $isSpam = $spamFilter->isSpam($headers, $body);
             if ($isSpam) {
 //                $spamReason = $spamFilter->getLastSpamReason() ?? 'Local spam filter detection';
+                $spamReason = 'API spam detection: ';
+                if (isset($apiResult['spam_analysis']['factors']) && is_array($apiResult['spam_analysis']['factors'])) {
+                    $spamReason .= implode(', ', $apiResult['spam_analysis']['factors']);
+                } else {
+                    $spamReason .= 'Unknown factors';
+                }
                 $logger->info("Local spam filter flagged email: $spamReason");
 
                 $this->handleSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
@@ -219,100 +225,94 @@ class Postfix
 
 
             }
-            else {
-                $logger->info("Local spam filter: email is clean");
 
-                // Only check API if local filter didn't detect spam
+            $logger->info("Local spam filter: email is clean");
+
+            // Only check API if local filter didn't detect spam
 
 // Only check API if local filter didn't detect spam
-                if (($this->config['api']['check_spam_against_server'] ?? true)) {
-                    $logger->info("No local spam detected, checking with API...");
+            if (($this->config['api']['check_spam_against_server'] ?? true)) {
+                $logger->info("No local spam detected, checking with API...");
+                try {
+                    $apiClient = $this->getApiClient($logger);
+                    $logger->info("DEBUG: Using ApiClient");
+                    $logger->info("DEBUG: About to call login()");
                     try {
-                        $apiClient = $this->getApiClient($logger);
-                        $logger->info("DEBUG: Using ApiClient");
-                        $logger->info("DEBUG: About to call login()");
-                        try {
-                            $apiClient->login();
-                            $logger->info("DEBUG: Login completed successfully");
-                        } catch (Exception $e) {
-                            $logger->error("ERROR: Login failed: " . $e->getMessage());
-                            throw $e;
-                        }
+                        $apiClient->login();
+                        $logger->info("DEBUG: Login completed successfully");
+                    } catch (Exception $e) {
+                        $logger->error("ERROR: Login failed: " . $e->getMessage());
+                        throw $e;
+                    }
 
-                        $logger->info("DEBUG: Checking config values...");
+                    $logger->info("DEBUG: Checking config values...");
 
-                        // This is the missing part that actually calls the API for spam checking
-                        $response = $apiClient->analyzeSpam(
-                            $headers['From'] ,
-                            $body,
-                            $headers,
-                            [
-                                'ip' => $senderIp ?? $_SERVER['REMOTE_ADDR'] ,
-                                'to_email' => $recipient,
-                                'hostname' => gethostname(),
-                                'threshold' => $this->config['api']['spam_threshold'] ?? 70
-                            ]
-                        );
+                    // This is the missing part that actually calls the API for spam checking
+                    $response = $apiClient->analyzeSpam(
+                        $headers['From'] ,
+                        $body,
+                        $headers,
+                        [
+                            'ip' => $senderIp ?? $_SERVER['REMOTE_ADDR'] ,
+                            'to_email' => $recipient,
+                            'hostname' => gethostname(),
+                            'threshold' => $this->config['api']['spam_threshold'] ?? 70
+                        ]
+                    );
 
-                        $logger->info("DEBUG: API response received: " . json_encode($response));
+                    $logger->info("DEBUG: API response received: " . json_encode($response));
 
-                        // Process the API response
-                        if ($response['status_code'] === 200) {
-                            $apiResult = $response['response'];
-                            $logger->info("API Results: ", $apiResult);
+                    // Process the API response
+                    if ($response['status_code'] === 200) {
+                        $apiResult = $response['response'];
+                        $logger->info("API Results: ", $apiResult);
 
 
-                            if (isset($apiResult['spam_analysis']) && is_array($apiResult['spam_analysis'])) {
-                                $isSpam = $apiResult['spam_analysis']['is_spam'] ?? false;
+                        if (isset($apiResult['spam_analysis']) && is_array($apiResult['spam_analysis'])) {
+                            $isSpam = $apiResult['spam_analysis']['is_spam'] ?? false;
 
-                                if ($isSpam) {
-                                    $isSpam = true;
+                            if ($isSpam) {
+                                $isSpam = true;
 //                                    $spamReason = 'API spam detection: ' . ($apiResult['reason'] ?? 'Unknown');
-                                    $spamReason = 'API spam detection: ';
-                                    if (isset($apiResult['spam_analysis']['factors']) && is_array($apiResult['spam_analysis']['factors'])) {
-                                        $spamReason .= implode(', ', $apiResult['spam_analysis']['factors']);
-                                    } else {
-                                        $spamReason .= 'Unknown factors';
-                                    }
-
-                                    $logger->info("API flagged email as spam: $spamReason");
-
-                                    $this->handleSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
-                                    return;
+                                $spamReason = 'API spam detection: ';
+                                if (isset($apiResult['spam_analysis']['factors']) && is_array($apiResult['spam_analysis']['factors'])) {
+                                    $spamReason .= implode(', ', $apiResult['spam_analysis']['factors']);
+                                } else {
+                                    $spamReason .= 'Unknown factors';
                                 }
 
-                                $logger->info("API confirmed email is clean");
+                                $logger->info("API flagged email as spam: $spamReason");
 
-                                // Process clean email (add footer if configured)
-                                if ($this->config['postfix']['spam_handling']['add_footer'] ?? false) {
-                                    $emailData = $this->addFooterIfConfigured($emailData);
-                                }
-
-                                // Deliver the clean email
-                                $this->requeueEmail($emailData, $recipient, $logger);
+                                $this->handleSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
                                 return;
                             }
-                        } else {
-                            $logger->warning("API returned non-200 status: " . $response['status_code']);
+
+                            $logger->info("API confirmed email is clean");
+
+                            // Process clean email (add footer if configured)
+                            if ($this->config['postfix']['spam_handling']['add_footer'] ?? false) {
+                                $emailData = $this->addFooterIfConfigured($emailData);
+                            }
+
+                            // Deliver the clean email
+                            $this->requeueEmail($emailData, $recipient, $logger);
+                            return;
                         }
-                    } catch (Exception $e) {
-                        $logger->error("API spam check failed: " . $e->getMessage());
-                        // Continue processing even if API check fails
+                    } else {
+                        $logger->warning("API returned non-200 status: " . $response['status_code']);
                     }
+                } catch (Exception $e) {
+                    $logger->error("API spam check failed: " . $e->getMessage());
+                    // Continue processing even if API check fails
                 }
+            }
 
 // If we get here, process as clean (API check failed or disabled)
-                $logger->info("Processing as clean email (default path)");
-                if ($this->config['postfix']['spam_handling']['add_footer'] ?? false) {
-                    $emailData = $this->addFooterIfConfigured($emailData);
-                }
-                $this->requeueEmail($emailData, $recipient , $logger);
-
-
-
-
-
+            $logger->info("Processing as clean email (default path)");
+            if ($this->config['postfix']['spam_handling']['add_footer'] ?? false) {
+                $emailData = $this->addFooterIfConfigured($emailData);
             }
+            $this->requeueEmail($emailData, $recipient , $logger);
         }
 
         $logger->info("Email is clean of spam. Proceeding with requeue.");
