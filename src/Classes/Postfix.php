@@ -259,25 +259,38 @@ class Postfix
                         // Process the API response
                         if ($response['status_code'] === 200) {
                             $apiResult = $response['response'];
+                            $logger->info("API Results: ", $apiResult);
 
-                            if ($apiResult['is_spam'] ?? false) {
-                                $isSpam = true;
-                                $spamReason = 'API spam detection: ' . ($apiResult['reason'] ?? 'Unknown');
-                                $logger->info("API flagged email as spam: $spamReason");
 
-                                $this->handleSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
-                                return;
-                            } else {
-                                $logger->info("API confirmed email is clean");
+                            if (isset($apiResult['spam_analysis']) && is_array($apiResult['spam_analysis'])) {
+                                $isSpam = $apiResult['spam_analysis']['is_spam'] ?? false;
 
-                                // Process clean email (add footer if configured)
-                                if ($this->config['postfix']['spam_handling']['add_footer'] ?? false) {
-                                    $emailData = $this->addFooterIfConfigured($emailData);
+                                if ($isSpam) {
+                                    $isSpam = true;
+//                                    $spamReason = 'API spam detection: ' . ($apiResult['reason'] ?? 'Unknown');
+                                    $spamReason = 'API spam detection: ';
+                                    if (isset($apiResult['spam_analysis']['factors']) && is_array($apiResult['spam_analysis']['factors'])) {
+                                        $spamReason .= implode(', ', $apiResult['spam_analysis']['factors']);
+                                    } else {
+                                        $spamReason .= 'Unknown factors';
+                                    }
+
+                                    $logger->info("API flagged email as spam: $spamReason");
+
+                                    $this->handleSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
+                                    return;
+                                } else {
+                                    $logger->info("API confirmed email is clean");
+
+                                    // Process clean email (add footer if configured)
+                                    if ($this->config['postfix']['spam_handling']['add_footer'] ?? false) {
+                                        $emailData = $this->addFooterIfConfigured($emailData);
+                                    }
+
+                                    // Deliver the clean email
+                                    $this->requeueEmail($emailData, $recipient, $logger);
+                                    return;
                                 }
-
-                                // Deliver the clean email
-                                $this->requeueEmail($emailData, $recipient, $logger);
-                                return;
                             }
                         } else {
                             $logger->warning("API returned non-200 status: " . $response['status_code']);
