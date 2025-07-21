@@ -261,13 +261,16 @@ class Postfix
                     );
 
                     $logger->info("DEBUG: API response received: " . json_encode($response, JSON_THROW_ON_ERROR));
-                    $logger->info("StatusCode:"  . $response['status_code']);
+                    $logger->info("StatusCode: "  . $response['status_code']);
+
 
                     // Process the API response
                     if ($response['status_code'] === 200) {
                         $apiResult = $response['response'];
 
                         $dataResults = json_decode($apiResult['data'], TRUE, 512, JSON_THROW_ON_ERROR);
+                        $dataResults_is_array = is_array($dataResults);
+                        $logger->info("data is array: "  . $dataResults_is_array);
 
                         if (isset($dataResults) && is_array($dataResults)) {
                             $logger->debug("DEBUG: 'data' key exists.");
