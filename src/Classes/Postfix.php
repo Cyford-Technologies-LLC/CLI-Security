@@ -260,7 +260,7 @@ class Postfix
                         ]
                     );
 
-                    $logger->info("DEBUG: API response received: " , $response);
+                    $logger->info("DEBUG: API response received: " . json_encode($response));
 
                     // Process the API response
                     if ($response['status_code'] === 200) {
