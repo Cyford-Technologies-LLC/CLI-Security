@@ -265,7 +265,7 @@ class Postfix
                     // Process the API response
                     if ($response['status_code'] === 200) {
                         $apiResult = $response['response'];
-                        $logger->info("API Results: " . $apiResult);
+                        $logger->info("API Results: " , $apiResult);
                         $dataResults = json_decode($apiResult['data'], TRUE, 512, JSON_THROW_ON_ERROR);
 
                         if (isset($dataResults) && is_array($dataResults)) {
