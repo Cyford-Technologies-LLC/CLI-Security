@@ -810,6 +810,7 @@ EOF;
         }
 
         $spamAction = $config['postfix']['spam_handling']['action'] ?? 'reject';
+        $logger->info("Spam Action: $spamAction");
         
         switch ($spamAction) {
             case 'reject':
