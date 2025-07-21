@@ -292,8 +292,8 @@ class Postfix
                                     $logger->info("API flagged email as spam: True"); // Simplified for now
 
                                     $spamReason = 'API spam detection: ';
-                                    if (isset($apiResult['spam_analysis']['factors']) && is_array($apiResult['spam_analysis']['factors'])) {
-                                        $spamReason .= implode(', ', $apiResult['spam_analysis']['factors']);
+                                    if (isset($apiResult['data']['spam_analysis']['factors']) && is_array($apiResult['data']['spam_analysis']['factors'])) {
+                                        $spamReason .= implode(', ', $apiResult['data']['spam_analysis']['factors']);
                                     } else {
                                         $spamReason .= 'Unknown factors';
                                     }
