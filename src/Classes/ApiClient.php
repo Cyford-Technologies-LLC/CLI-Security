@@ -354,7 +354,7 @@ class ApiClient
 
             if (!empty($updatedAlgorithms)) {
 
-                $this->logger->info("Response : " . json_encode($updatedAlgorithms) );
+                $this->logger->info("Response : " . json_encode($updatedAlgorithms, JSON_THROW_ON_ERROR));
 
                 if (!is_array($updatedAlgorithms)) {
                     $this->logger->error("Invalid data passed to syncDetectionAlgorithm. Data: " . var_export($updatedAlgorithms, true));
@@ -383,6 +383,7 @@ class ApiClient
             }
         } catch (RuntimeException $exception) {
             $this->logger->error("ERROR: Failed to update algorithms. Details: {$exception->getMessage()}");
+        } catch (\JsonException $e) {
         }
     }
 

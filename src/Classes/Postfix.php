@@ -380,7 +380,7 @@ class Postfix
         return <<<EOF
 # Cyford Security Filter Configuration
 # External SMTP (with content filter for security)
-{$publicIP}:smtp inet  n       -       n       -       -       smtpd
+$publicIP:smtp inet  n       -       n       -       -       smtpd
   -o content_filter=security-filter:dummy
 
 # Internal SMTP (no content filter)
@@ -461,7 +461,7 @@ EOF;
         if (!empty($headers['To'])) {
             $recipient = $this->extractEmailAddress($headers['To']);
             if (!empty($recipient)) {
-                $logger->info("Recipient found in To header: {$recipient}");
+                $logger->info("Recipient found in To header: $recipient");
                 return $recipient;
             }
         }
@@ -470,7 +470,7 @@ EOF;
         if (!empty($headers['Delivered-To'])) {
             $recipient = $this->extractEmailAddress($headers['Delivered-To']);
             if (!empty($recipient)) {
-                $logger->info("Recipient found in Delivered-To header: {$recipient}");
+                $logger->info("Recipient found in Delivered-To header: $recipient");
                 return $recipient;
             }
         }
@@ -479,7 +479,7 @@ EOF;
         if (!empty($headers['X-Original-To'])) {
             $recipient = $this->extractEmailAddress($headers['X-Original-To']);
             if (!empty($recipient)) {
-                $logger->info("Recipient found in X-Original-To header: {$recipient}");
+                $logger->info("Recipient found in X-Original-To header: $recipient");
                 return $recipient;
             }
         }
@@ -490,7 +490,7 @@ EOF;
             if (!empty($_ENV[$envVar])) {
                 $recipient = $this->extractEmailAddress($_ENV[$envVar]);
                 if (!empty($recipient)) {
-                    $logger->info("Recipient found in {$envVar} environment: {$recipient}");
+                    $logger->info("Recipient found in $envVar environment: $recipient");
                     return $recipient;
                 }
             }
@@ -503,7 +503,7 @@ EOF;
                 if (str_contains($arg, '@')) {
                     $recipient = $this->extractEmailAddress($arg);
                     if (!empty($recipient)) {
-                        $logger->info("Recipient found in server argv: {$recipient}");
+                        $logger->info("Recipient found in server argv: $recipient");
                         return $recipient;
                     }
                 }
@@ -517,7 +517,7 @@ EOF;
                 if ($iValue === '--recipient' && isset($argv[$i + 1])) {
                     $recipient = $this->extractEmailAddress($argv[$i + 1]);
                     if (!empty($recipient)) {
-                        $logger->info("Recipient found in --recipient argument: {$recipient}");
+                        $logger->info("Recipient found in --recipient argument: $recipient");
                         return $recipient;
                     }
                 }
@@ -525,7 +525,7 @@ EOF;
                 if (str_starts_with($iValue, '--recipient=')) {
                     $recipient = $this->extractEmailAddress(substr($iValue, 12));
                     if (!empty($recipient)) {
-                        $logger->info("Recipient found in --recipient= argument: {$recipient}");
+                        $logger->info("Recipient found in --recipient= argument: $recipient");
                         return $recipient;
                     }
                 }
@@ -536,7 +536,7 @@ EOF;
                 if (str_contains($arg, '@')) {
                     $recipient = $this->extractEmailAddress($arg);
                     if (!empty($recipient)) {
-                        $logger->info("Recipient found in command line: {$recipient}");
+                        $logger->info("Recipient found in command line: $recipient");
                         return $recipient;
                     }
                 }
@@ -548,7 +548,7 @@ EOF;
             if (str_contains($headerValue, '@') && !in_array($headerName, ['From', 'Reply-To', 'Return-Path', 'Sender'])) {
                 $recipient = $this->extractEmailAddress($headerValue);
                 if (!empty($recipient) && str_contains($recipient, 'cyfordtechnologies.com')) {
-                    $logger->info("Recipient found in {$headerName} header: {$recipient}");
+                    $logger->info("Recipient found in $headerName header: $recipient");
                     return $recipient;
                 }
             }
@@ -590,7 +590,7 @@ EOF;
         $requeueMethod = $config['postfix']['requeue_method'] ?? 'postdrop';
 
         if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
-            $message = "Invalid recipient email after extraction: {$recipient}";
+            $message = "Invalid recipient email after extraction: $recipient";
             $logger->error($message);
             throw new InvalidArgumentException($message);
         }
@@ -620,7 +620,7 @@ EOF;
                 $this->requeueWithDovecotLDA($emailData, $recipient, $logger);
                 break;
             default:
-                $error = "Unknown requeue method: {$requeueMethod}";
+                $error = "Unknown requeue method: $requeueMethod";
                 $logger->error($error);
                 throw new RuntimeException($error);
         }
@@ -632,7 +632,7 @@ EOF;
     private function requeueWithSendmail(string $emailData, string $recipient, $logger): void
     {
         $sendmailPath = '/usr/sbin/sendmail';
-        $requeueCommand = "{$sendmailPath} -i -- {$recipient}";
+        $requeueCommand = "$sendmailPath -i -- $recipient";
         $logger->info("Executing sendmail command: $requeueCommand");
 
         $process = proc_open($requeueCommand, [
@@ -674,7 +674,7 @@ EOF;
         
         $socket = fsockopen($smtpHost, $smtpPort, $errno, $errstr, 30);
         if (!$socket) {
-            throw new RuntimeException("Failed to connect to SMTP server: {$errstr} ({$errno})");
+            throw new RuntimeException("Failed to connect to SMTP server: $errstr ($errno)");
         }
         
         try {
@@ -699,7 +699,7 @@ EOF;
             }
             
             // RCPT TO
-            fwrite($socket, "RCPT TO:<{$recipient}>\r\n");
+            fwrite($socket, "RCPT TO:<$recipient>\r\n");
             $response = fgets($socket);
             if (!str_starts_with($response, '250')) {
                 throw new RuntimeException("RCPT TO failed: $response");
@@ -749,7 +749,7 @@ EOF;
                 throw new RuntimeException("Failed to write temporary file");
             }
             
-            $command = "postdrop < {$tempFile}";
+            $command = "postdrop < $tempFile";
             $result = shell_exec($command . ' 2>&1');
             
             if ($result !== null && trim($result) !== '') {
@@ -774,23 +774,23 @@ EOF;
         
         $pickupDir = '/var/spool/postfix/pickup';
         $queueId = uniqid('sec_', true);
-        $tempFile = "/tmp/{$queueId}";
-        $finalFile = "{$pickupDir}/{$queueId}";
+        $tempFile = "/tmp/$queueId";
+        $finalFile = "$pickupDir/$queueId";
         
         try {
             if (file_put_contents($tempFile, $emailData) === false) {
                 throw new RuntimeException("Failed to write temporary file");
             }
             
-            $moveCmd = "sudo mv {$tempFile} {$finalFile}";
+            $moveCmd = "sudo mv $tempFile $finalFile";
             exec($moveCmd, $output, $returnCode);
             
             if ($returnCode !== 0) {
                 throw new RuntimeException("Move failed with return code: $returnCode");
             }
             
-            exec("sudo chown postfix:postdrop {$finalFile}");
-            exec("sudo chmod 644 {$finalFile}");
+            exec("sudo chown postfix:postdrop $finalFile");
+            exec("sudo chmod 644 $finalFile");
             
             $logger->info("Email successfully queued via pickup directory: $queueId");
             
@@ -949,7 +949,7 @@ EOF;
             // If no existing spam folder found, create default one
             if (!$maildirPath) {
                 $defaultSpamFolder = $config['postfix']['spam_handling']['quarantine_folder'] ?? 'Spam';
-                $maildirPath = "$userMaildir/.{$defaultSpamFolder}";
+                $maildirPath = "$userMaildir/.$defaultSpamFolder";
                 
                 $logger->info("No existing spam folder found, creating: $maildirPath");
                 
@@ -1188,14 +1188,14 @@ EOF;
     {
         $timestamp = date('Ymd_His');
         $backupDir = $this->backupDirectory;
-        $backupFile = "{$backupDir}/" . basename($filePath) . ".backup_{$timestamp}";
+        $backupFile = "$backupDir/" . basename($filePath) . ".backup_$timestamp";
 
         // Ensure backup directory exists and is writable
         if (!is_dir($backupDir)) {
             if (!mkdir($backupDir, 0755, true) && !is_dir($backupDir)) {
                 // Try /tmp as fallback
                 $backupDir = '/tmp';
-                $backupFile = "{$backupDir}/" . basename($filePath) . ".backup_{$timestamp}";
+                $backupFile = "$backupDir/" . basename($filePath) . ".backup_$timestamp";
             }
         }
 
@@ -1203,7 +1203,7 @@ EOF;
         if (!is_writable($backupDir)) {
             echo "WARNING: Cannot write to $backupDir, using /tmp for backup\n";
             $backupDir = '/tmp';
-            $backupFile = "{$backupDir}/" . basename($filePath) . ".backup_{$timestamp}";
+            $backupFile = "$backupDir/" . basename($filePath) . ".backup_$timestamp";
         }
 
         // Create the backup
@@ -1342,7 +1342,7 @@ EOF;
         $tempFile = tempnam('/tmp', 'system_error_bounce_');
         file_put_contents($tempFile, $bounceEmail);
         
-        $command = "/usr/sbin/sendmail -t < {$tempFile}";
+        $command = "/usr/sbin/sendmail -t < $tempFile";
         shell_exec($command);
         
         unlink($tempFile);
@@ -1360,7 +1360,7 @@ EOF;
             return;
         }
         
-        $quarantineFolder = "/home/{$realUser}/Maildir/.SystemErrors";
+        $quarantineFolder = "/home/$realUser/Maildir/.SystemErrors";
         
         if (!is_dir($quarantineFolder)) {
             if (!mkdir($quarantineFolder, 0755, true) && !is_dir($quarantineFolder)) {
@@ -1415,7 +1415,7 @@ EOF;
         // Extract username from recipient
         $username = explode('@', $recipient)[0];
         
-        $command = "{$ldaPath} -d {$username} -f ''";
+        $command = "$ldaPath -d $username -f ''";
         $logger->info("Executing dovecot-lda command: $command");
         
         $process = proc_open($command, [
@@ -1506,11 +1506,11 @@ EOF;
 
         // Run all threat detectors
         foreach ($this->threatDetectors as $category => $detector) {
-            $this->logger->info("Running {$category} threat detector...");
+            $this->logger->info("Running $category threat detector...");
             $result = $detector->analyze($headers, $body);
             $this->lastThreatResults[$category] = $result;
 
-            $this->logger->info("{$category} detection result: " . ($result['is_threat'] ? "THREAT DETECTED" : "Clean"), [
+            $this->logger->info("$category detection result: " . ($result['is_threat'] ? "THREAT DETECTED" : "Clean"), [
                 'matches' => $result['matches'] ?? [],
                 'score' => $result['score'] ?? 0
             ]);
