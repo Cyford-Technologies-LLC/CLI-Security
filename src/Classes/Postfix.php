@@ -39,7 +39,7 @@ class Postfix
         $this->systems = $systems ?? new Systems();
         $this->logger = new Logger($config);
         
-        // Initialize database if hash detection is enabled
+        // Initialize a database if hash detection is enabled
         if ($config['postfix']['spam_handling']['hash_detection'] ?? false) {
             try {
                 $this->database = new Database($config);
@@ -121,6 +121,9 @@ class Postfix
         if (!$emailData) {
             throw new RuntimeException("No email data received from Postfix.");
         }
+
+
+
         $logger->info("Raw email data successfully read.");
 
         // Parse headers and body
@@ -128,9 +131,12 @@ class Postfix
         $logger->info("Parsed headers: " . json_encode($headers, JSON_THROW_ON_ERROR));
 
 
+
         // Extract sender IP after parsing
         $senderIp = $this->extractSenderIp($headers, $emailData);
         $this->logger->info("Sender IP: " . ($senderIp ?: 'Not found'));
+
+
 
 
         // Skip system/security emails to prevent loops
@@ -143,6 +149,8 @@ class Postfix
             return;
         }
 
+
+
         // Get recipient with multiple fallback methods
         $recipient = $this->getRecipient($headers, $logger);
         if (empty($recipient)) {
@@ -152,6 +160,20 @@ class Postfix
         $logger->info("Recipient resolved: $recipient");
 
         $subject = $headers['Subject'] ?? '';
+
+        // WHITELIST CHECK - Skip all spam checks if whitelisted
+        if ($this->isWhitelisted($headers, $emailData, $senderIp, $logger)) {
+            $logger->info("Email is whitelisted, skipping spam checks and delivering directly");
+            // For allowlisted emails, you might still want to add a special footer or header
+            if ($this->config['postfix']['spam_handling']['add_footer'] ?? false) {
+                $emailData = $this->addFooterIfConfigured($emailData, true); // true indicates allowlisted
+            }
+            $this->requeueEmail($emailData, $recipient, $logger);
+            return; // Exit processing - email is already delivered
+        }
+
+
+
         $isSpam = false;
         $spamReason = '';
 
@@ -1672,4 +1694,158 @@ EOF;
             ($long >= ip2long('192.168.0.0') && $long <= ip2long('192.168.255.255'))
         );
     }
+    /**
+     * Check if email is whitelisted based on sender email, domain, or IP
+     *
+     * @param array $headers Email headers
+     * @param string $emailData Raw email data
+     * @param string|null $senderIp Sender IP address
+     * @param Logger $logger Logger instance
+     * @return bool True if whitelisted, false otherwise
+     */
+    public function isWhitelisted(array $headers, string $emailData, ?string $senderIp, Logger $logger): bool
+    {
+        $logger->info("Checking whitelist status for email...");
+
+        // Get sender email from headers
+        $senderEmail = $headers['From'] ?? '';
+        if (preg_match('/<([^>]+)>/', $senderEmail, $matches)) {
+            $senderEmail = $matches[1];
+        }
+        $senderEmail = trim($senderEmail);
+
+        if (empty($senderEmail)) {
+            $logger->warning("Could not extract sender email for whitelist check");
+            return false;
+        }
+
+        // Extract domain from sender email
+        $senderDomain = '';
+        if (strpos($senderEmail, '@') !== false) {
+            [, $senderDomain] = explode('@', $senderEmail, 2);
+        }
+
+        // Check whitelist files
+        $whitelistFiles = [
+            'emails' => $this->config['whitelist']['emails_file'] ?? '/usr/local/share/cyford/security/lists/whitelist_emails.txt',
+            'domains' => $this->config['whitelist']['domains_file'] ?? '/usr/local/share/cyford/security/lists/whitelist_domains.txt',
+            'ips' => $this->config['whitelist']['ips_file'] ?? '/usr/local/share/cyford/security/lists/whitelist_ips.txt',
+        ];
+
+        // Check the email allowlist
+        if (!empty($senderEmail) && file_exists($whitelistFiles['emails'])) {
+            $emailWhitelist = array_map('trim', file($whitelistFiles['emails'], FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES));
+            foreach ($emailWhitelist as $whiteEmail) {
+                // Skip comments
+                if (strpos($whiteEmail, '#') === 0) {
+                    continue;
+                }
+
+                if (strtolower($senderEmail) === strtolower($whiteEmail)) {
+                    $logger->info("Email whitelisted: $senderEmail matches whitelist entry");
+                    return true;
+                }
+            }
+        }
+
+        // Check the domain allowlist
+        if (!empty($senderDomain) && file_exists($whitelistFiles['domains'])) {
+            $domainWhitelist = array_map('trim', file($whitelistFiles['domains'], FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES));
+            foreach ($domainWhitelist as $whiteDomain) {
+                // Skip comments
+                if (strpos($whiteDomain, '#') === 0) {
+                    continue;
+                }
+
+                // Exact domain match
+                if (strtolower($senderDomain) === strtolower($whiteDomain)) {
+                    $logger->info("Domain whitelisted: $senderDomain matches whitelist entry");
+                    return true;
+                }
+
+                // Subdomain wildcard match (*.example.com)
+                if (substr($whiteDomain, 0, 2) === '*.' &&
+                    substr_compare(strtolower($senderDomain), strtolower(substr($whiteDomain, 1)), -strlen(substr($whiteDomain, 1))) === 0) {
+                    $logger->info("Domain whitelisted: $senderDomain matches wildcard entry $whiteDomain");
+                    return true;
+                }
+            }
+        }
+
+        // Check IP whitelist
+        if (!empty($senderIp) && file_exists($whitelistFiles['ips'])) {
+            $ipWhitelist = array_map('trim', file($whitelistFiles['ips'], FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES));
+            foreach ($ipWhitelist as $whiteIp) {
+                // Skip comments
+                if (strpos($whiteIp, '#') === 0) {
+                    continue;
+                }
+
+                // Exact IP match
+                if ($senderIp === $whiteIp) {
+                    $logger->info("IP whitelisted: $senderIp matches whitelist entry");
+                    return true;
+                }
+
+                // CIDR notation match (192.168.1.0/24)
+                if (strpos($whiteIp, '/') !== false) {
+                    if ($this->isIpInCidrRange($senderIp, $whiteIp)) {
+                        $logger->info("IP whitelisted: $senderIp is in CIDR range $whiteIp");
+                        return true;
+                    }
+                }
+            }
+        }
+
+        $logger->info("Email not whitelisted");
+        return false;
+    }
+
+    /**
+     * Check if an IP address is within a CIDR range
+     *
+     * @param string $ip IP address to check
+     * @param string $cidr CIDR range (e.g., 192.168.1.0/24)
+     * @return bool True if IP is in range, false otherwise
+     */
+    private function isIpInCidrRange(string $ip, string $cidr): bool
+    {
+        [$subnet, $bits] = explode('/', $cidr);
+        $ip = ip2long($ip);
+        $subnet = ip2long($subnet);
+        $mask = -1 << (32 - (int)$bits);
+        $subnet &= $mask;
+
+        return ($ip & $mask) === $subnet;
+    }
+
+    /**
+     * Process a whitelisted email by passing it through to the original recipient
+     *
+     * @param string $emailData Raw email data
+     * @param array $headers Email headers
+     * @param string $recipient Email recipient
+     * @param Logger $logger Logger instance
+     */
+
+
+    /**
+     * Add whitelist check to the main email processing flow
+     *
+     * Update your processEmailInternal method to include this right after parsing headers and before spam checks
+     */
+
+// Usage example in processEmailInternal:
+    /*
+    // After extracting headers, body and sender IP
+
+    // Check whitelist - skip spam checks if whitelisted
+    if ($this->isWhitelisted($headers, $emailData, $senderIp, $logger)) {
+        $logger->info("Email is whitelisted, skipping spam checks and delivering directly");
+        $this->processWhitelistedEmail($emailData, $headers, $recipient, $logger);
+        return; // Exit processing - email is already delivered
+    }
+
+    // Continue with normal spam checks if not whitelisted
+    */
 }
