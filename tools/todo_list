@@ -6,3 +6,10 @@
 5  fix other rate issues from server
 6  fix admin in server
 7  add  client admin  spam diag  from user dir
+
+
+
+8  integrate fail2ban
+9  integrate firewalld / iptables
+10 start reporting better / aggressive
+
