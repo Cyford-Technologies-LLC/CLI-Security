@@ -852,7 +852,33 @@ EOF;
         // Check spam handling method FIRST
         $spamHandlingMethod = $config['postfix']['spam_handling_method'] ?? 'maildir';
 
-        if ($spamHandlingMethod === 'maildir') {
+        // Check if recipient is an alias
+        $aliasTargets = $this->getAliasTargets($recipient, $logger);
+
+        if (!empty($aliasTargets)) {
+            $logger->info("Recipient $recipient is an alias for " . count($aliasTargets) . " targets");
+
+            // Process spam for each target of the alias
+            foreach ($aliasTargets as $target) {
+                $logger->info("Processing spam for alias target: $target");
+
+                // Check spam handling method for this alias target
+                $spamHandlingMethod = $config['postfix']['spam_handling_method'] ?? 'maildir';
+
+                if ($spamHandlingMethod === 'maildir') {
+                    $logger->info("Using maildir spam handling for alias target: $target");
+                    $this->deliverSpamToMaildir($emailData, $target, $logger);
+                } else {
+                    // Handle other spam actions for this alias target
+                    $this->processSpamWithDefaultActions($emailData, $headers, $target, $spamReason, $logger);
+                }
+            }
+            // Email has been handled for all alias targets
+            exit(0);
+        }
+
+
+            if ($spamHandlingMethod === 'maildir') {
             $logger->info("Using maildir / cron spam handling method");
             $this->deliverSpamToMaildir($emailData, $recipient, $logger);
             return;
@@ -1951,7 +1977,76 @@ EOF;
         return false;
     }
 
+    /**
+     * Check if an email address is an alias and return all target recipients
+     *
+     * @param string $recipient Email address to check
+     * @param mixed $logger Logger instance
+     * @return array List of target recipients for this alias, empty if not an alias
+     */
+    private function getAliasTargets(string $recipient, $logger): array
+    {
+        $localPart = strstr($recipient, '@', true);
+        $domain = substr(strstr($recipient, '@'), 1);
 
+        $logger->info("Checking if $recipient is an alias");
+
+        // List of potential alias files to check
+        $aliasFiles = [
+            '/etc/postfix/virtual',
+            '/etc/postfix/virtual_aliases',
+            '/etc/aliases',
+            '/etc/postfix/aliases'
+        ];
+
+        foreach ($aliasFiles as $aliasFile) {
+            if (file_exists($aliasFile)) {
+                $logger->info("Checking alias file: $aliasFile");
+                $aliases = file($aliasFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+
+                foreach ($aliases as $line) {
+                    // Skip comments
+                    if (strpos(trim($line), '#') === 0) {
+                        continue;
+                    }
+
+                    // Parse alias line (format: alias target)
+                    $parts = preg_split('/\s+/', $line, 2);
+                    if (count($parts) != 2) {
+                        continue;
+                    }
+
+                    list($aliasAddress, $targetAddresses) = $parts;
+
+                    // Normalize to match our format if needed
+                    if (strpos($aliasAddress, '@') === false && strpos($recipient, '@' . $domain) !== false) {
+                        $aliasAddress .= '@' . $domain;
+                    }
+
+                    // Check if this matches our alias
+                    if ($aliasAddress === $recipient || $aliasAddress === $localPart) {
+                        $logger->info("Found alias mapping: $aliasAddress => $targetAddresses");
+
+                        // Split multiple targets and trim whitespace
+                        $targets = array_map('trim', explode(',', $targetAddresses));
+
+                        // Ensure each target has a domain if needed
+                        foreach ($targets as &$target) {
+                            if (strpos($target, '@') === false) {
+                                $target .= '@' . $domain;
+                            }
+                        }
+
+                        $logger->info("Alias targets: " . implode(', ', $targets));
+                        return $targets;
+                    }
+                }
+            }
+        }
+
+        $logger->info("$recipient is not an alias");
+        return [];
+    }
 
 
 }
