@@ -162,11 +162,12 @@ class Postfix
         $subject = $headers['Subject'] ?? '';
 
         // WHITELIST CHECK - Skip all spam checks if whitelisted
+        $logger->info("Checking  whitelisted");
         if ($this->isWhitelisted($headers, $emailData, $senderIp, $logger)) {
             $logger->info("Email is whitelisted, skipping spam checks and delivering directly");
             // For allowlisted emails, you might still want to add a special footer or header
             if ($this->config['postfix']['spam_handling']['add_footer'] ?? false) {
-                $emailData = $this->addFooterIfConfigured($emailData, true); // true indicates allowlisted
+                $emailData = $this->addFooterIfConfigured($emailData, false); // true indicates allowlisted
             }
             $this->requeueEmail($emailData, $recipient, $logger);
             return; // Exit processing - email is already delivered
