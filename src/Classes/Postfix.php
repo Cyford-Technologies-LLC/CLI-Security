@@ -163,6 +163,15 @@ class Postfix
 
         // WHITELIST CHECK - Skip all spam checks if whitelisted
         $logger->info("Checking  whitelisted");
+        if ($this->isBlacklisted($headers, $emailData, $senderIp, $logger)) {
+            $logger->info("Email is blacklisted, rejecting");
+            $spamReason = "Email is blacklisted";
+            $this->handleSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
+            return;
+            exit(1); // Exit with code 1 for Postfix to reject the message
+        }
+
+
         if ($this->isWhitelisted($headers, $emailData, $senderIp, $logger)) {
             $logger->info("Email is whitelisted, skipping spam checks and delivering directly");
             // For allowlisted emails, you might still want to add a special footer or header
@@ -1836,17 +1845,114 @@ EOF;
      * Update your processEmailInternal method to include this right after parsing headers and before spam checks
      */
 
-// Usage example in processEmailInternal:
-    /*
-    // After extracting headers, body and sender IP
+    /**
+     * Check if email is blacklisted based on sender email, domain, or IP
+     *
+     * @param array $headers Email headers
+     * @param string $emailData Raw email data
+     * @param string|null $senderIp Sender IP address
+     * @param Logger $logger Logger instance
+     * @return bool True if blacklisted, false otherwise
+     */
+    public function isBlacklisted(array $headers, string $emailData, ?string $senderIp, Logger $logger): bool
+    {
+        $logger->info("Checking blacklist status for email...");
 
-    // Check whitelist - skip spam checks if whitelisted
-    if ($this->isWhitelisted($headers, $emailData, $senderIp, $logger)) {
-        $logger->info("Email is whitelisted, skipping spam checks and delivering directly");
-        $this->processWhitelistedEmail($emailData, $headers, $recipient, $logger);
-        return; // Exit processing - email is already delivered
+        // Get sender email from headers
+        $senderEmail = $headers['From'] ?? '';
+        if (preg_match('/<([^>]+)>/', $senderEmail, $matches)) {
+            $senderEmail = $matches[1];
+        }
+        $senderEmail = trim($senderEmail);
+
+        if (empty($senderEmail)) {
+            $logger->warning("Could not extract sender email for blacklist check");
+            return false;
+        }
+
+        // Extract domain from sender email
+        $senderDomain = '';
+        if (strpos($senderEmail, '@') !== false) {
+            [, $senderDomain] = explode('@', $senderEmail, 2);
+        }
+
+        // Check blacklist files
+        $blacklistFiles = [
+            'emails' => $this->config['blacklist']['emails_file'] ?? '/usr/local/share/cyford/security/lists/blacklist_emails.txt',
+            'domains' => $this->config['blacklist']['domains_file'] ?? '/usr/local/share/cyford/security/lists/blacklist_domains.txt',
+            'ips' => $this->config['blacklist']['ips_file'] ?? '/usr/local/share/cyford/security/lists/blacklist_ips.txt',
+        ];
+
+        // Check email blacklist
+        if (!empty($senderEmail) && file_exists($blacklistFiles['emails'])) {
+            $emailBlacklist = array_map('trim', file($blacklistFiles['emails'], FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES));
+            foreach ($emailBlacklist as $blackEmail) {
+                // Skip comments
+                if (strpos($blackEmail, '#') === 0) {
+                    continue;
+                }
+
+                if (strtolower($senderEmail) === strtolower($blackEmail)) {
+                    $logger->info("Email blacklisted: $senderEmail matches blacklist entry");
+                    return true;
+                }
+            }
+        }
+
+        // Check domain blacklist
+        if (!empty($senderDomain) && file_exists($blacklistFiles['domains'])) {
+            $domainBlacklist = array_map('trim', file($blacklistFiles['domains'], FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES));
+            foreach ($domainBlacklist as $blackDomain) {
+                // Skip comments
+                if (strpos($blackDomain, '#') === 0) {
+                    continue;
+                }
+
+                // Exact domain match
+                if (strtolower($senderDomain) === strtolower($blackDomain)) {
+                    $logger->info("Domain blacklisted: $senderDomain matches blacklist entry");
+                    return true;
+                }
+
+                // Subdomain wildcard match (*.example.com)
+                if (substr($blackDomain, 0, 2) === '*.' &&
+                    substr_compare(strtolower($senderDomain), strtolower(substr($blackDomain, 1)), -strlen(substr($blackDomain, 1))) === 0) {
+                    $logger->info("Domain blacklisted: $senderDomain matches wildcard entry $blackDomain");
+                    return true;
+                }
+            }
+        }
+
+        // Check IP blacklist
+        if (!empty($senderIp) && file_exists($blacklistFiles['ips'])) {
+            $ipBlacklist = array_map('trim', file($blacklistFiles['ips'], FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES));
+            foreach ($ipBlacklist as $blackIp) {
+                // Skip comments
+                if (strpos($blackIp, '#') === 0) {
+                    continue;
+                }
+
+                // Exact IP match
+                if ($senderIp === $blackIp) {
+                    $logger->info("IP blacklisted: $senderIp matches blacklist entry");
+                    return true;
+                }
+
+                // CIDR notation match (192.168.1.0/24)
+                if (strpos($blackIp, '/') !== false) {
+                    if ($this->isIpInCidrRange($senderIp, $blackIp)) {
+                        $logger->info("IP blacklisted: $senderIp is in CIDR range $blackIp");
+                        return true;
+                    }
+                }
+            }
+        }
+
+        $logger->info("Email not blacklisted");
+        return false;
     }
 
-    // Continue with normal spam checks if not whitelisted
-    */
+
+
+
 }

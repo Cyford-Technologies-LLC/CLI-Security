@@ -108,7 +108,12 @@ return [
         'ips_file' => '/usr/local/share/cyford/security/lists/blacklist_ips.txt',
         'domains_file' => '/usr/local/share/cyford/security/lists/blacklist_domains.txt',
         'emails_file' => '/usr/local/share/cyford/security/lists/blacklist_emails.txt',
+        'action' => 'reject', // Options: 'reject', 'quarantine', 'tag'
+        'report_to_fail2ban' => true,
+        'fail2ban_jail' => 'cyford-email',
+        'block_in_firewall' => false, // Be careful with this option
     ],
+
 
     'errors' => [
         'report_errors' => 1,
