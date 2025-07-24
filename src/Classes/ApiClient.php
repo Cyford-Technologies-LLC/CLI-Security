@@ -454,6 +454,113 @@ class ApiClient
             $headers
         );
     }
+    /**
+     * Report an IP address to the API
+     *
+     * @param string $ip IP address to report
+     * @param array $categories Categories for this IP (e.g., [3, 5] for spam and brute force)
+     * @param string $source Source of the report (e.g., 'fail2ban', 'manual', 'firewall')
+     * @param array $metadata Additional metadata about the IP
+     * @return array API response
+     * @throws RuntimeException
+     */
+    public function reportIp(string $ip, array $categories, string $source = 'manual', array $metadata = []): array
+    {
+        $this->logger->info("DEBUG: reportIp called for IP: {$ip}");
 
+        if (!$this->token) {
+            $this->login();
+        }
+
+        // Validate IP address
+        if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+            throw new RuntimeException("Invalid IP address: {$ip}");
+        }
+
+        // Convert categories to comma-separated string if needed
+        $categoriesParam = is_array($categories) ? implode(',', $categories) : $categories;
+
+        // Prepare request parameters
+        $params = [
+            'ips' => $ip,
+            'categories' => $categoriesParam,
+            'source' => $source
+        ];
+
+        // Add metadata if provided
+        if (!empty($metadata)) {
+            $params['metadata'] = json_encode($metadata);
+        }
+
+        // Prepare headers
+        $headers = $this->addClientIdHeader([
+            'Authorization: Bearer ' . $this->token,
+            'Content-Type: application/json'
+        ]);
+
+        // Send the request
+        return $this->sendRequest(
+            $this->baseUrl . self::REPORT_URI,
+            'POST',
+            $params,
+            $headers
+        );
+    }
+
+    /**
+     * Report multiple IP addresses to the API
+     *
+     * @param array $ips Array of IP addresses to report
+     * @param array $categories Categories for these IPs
+     * @param string $source Source of the report
+     * @param array $metadata Additional metadata about the IPs
+     * @return array API response
+     * @throws RuntimeException
+     */
+    public function reportMultipleIps(array $ips, array $categories, string $source = 'batch', array $metadata = []): array
+    {
+        $this->logger->info("DEBUG: reportMultipleIps called for " . count($ips) . " IPs");
+
+        if (!$this->token) {
+            $this->login();
+        }
+
+        // Validate IP addresses
+        foreach ($ips as $ip) {
+            if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+                throw new RuntimeException("Invalid IP address in batch: {$ip}");
+            }
+        }
+
+        // Convert arrays to comma-separated strings
+        $ipsParam = implode(',', $ips);
+        $categoriesParam = implode(',', $categories);
+
+        // Prepare request parameters
+        $params = [
+            'ips' => $ipsParam,
+            'categories' => $categoriesParam,
+            'source' => $source
+        ];
+
+        // Add metadata if provided
+        if (!empty($metadata)) {
+            $params['metadata'] = json_encode($metadata);
+        }
+
+        // Prepare headers
+        $headers = $this->addClientIdHeader([
+            'Authorization: Bearer ' . $this->token,
+            'Content-Type: application/json'
+        ]);
+
+        // Send the request
+        return $this->sendRequest(
+            $this->baseUrl . self::REPORT_URI,
+            'POST',
+            $params,
+            $headers
+        );
+    }
 
 }
