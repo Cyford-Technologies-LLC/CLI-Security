@@ -499,9 +499,29 @@ class ApiClient
             'Content-Type: application/json'
         ]);
 
+        $categoriesParam = is_array($categories) ? implode(',', $categories) : $categories;
+
+        $urlParams = [
+            'IP' => $ip,              // Important: Use 'IP' instead of 'ips' as URL parameter
+            'categories' => $categoriesParam,
+            'source' => $source
+        ];
+
+
+        // For API authentication
+        if (!empty($this->email)) {
+            $urlParams['email'] = $this->email;
+        }
+
+
+        // Create the URL with query parameters
+        $url = $this->baseUrl . self::REPORT_URI . '?' . http_build_query($urlParams);
+
+
+
         // Send the request
         return $this->sendRequest(
-            $this->baseUrl . self::REPORT_URI,
+            $url,
             'POST',
             $params,
             $headers
