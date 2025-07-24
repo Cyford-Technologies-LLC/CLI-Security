@@ -2400,7 +2400,93 @@ CONF;
 
 
 
+    /**
+     * Report an IP address to the API
+     *
+     * @param string|null $ip The IP address to report
+     * @param string $jail The source jail or application
+     * @param string $reason The reason for reporting
+     */
+    private function reportIp(?string $ip, string $jail = 'unknown', string $reason = 'Manual report'): void
+    {
+        if (!$ip) {
+            echo "❌ No IP address provided\n";
+            return;
+        }
 
+        // Validate IP address
+        if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+            echo "❌ Invalid IP address: {$ip}\n";
+            return;
+        }
+
+        echo "🔍 Reporting IP {$ip} from jail {$jail}...\n";
+
+        try {
+            // Determine appropriate categories based on jail
+            $categories = $this->getIPCategoriesFromJail($jail);
+
+            // Metadata with additional context
+            $metadata = [
+                'jail' => $jail,
+                'reason' => $reason,
+                'hostname' => gethostname(),
+                'timestamp' => time()
+            ];
+
+            // Call the API to report the IP
+            $result = $this->apiClient->reportIp($ip, $categories, 'fail2ban', $metadata);
+
+            if (isset($result['status_code']) && $result['status_code'] === 200) {
+                echo "✅ Successfully reported IP {$ip}\n";
+
+                // Log to database if available
+                try {
+                    $database = new Database($this->config);
+                    $database->logReportedIP($ip, $jail, $reason, json_encode($result));
+                } catch (Exception $e) {
+                    // Just log the error but continue
+                    if ($this->logger) {
+                        $this->logger->warning("Could not log IP to database: " . $e->getMessage());
+                    }
+                }
+            } else {
+                echo "❌ Failed to report IP: " . json_encode($result) . "\n";
+            }
+        } catch (Exception $e) {
+            echo "❌ Error reporting IP: " . $e->getMessage() . "\n";
+            if ($this->logger) {
+                $this->logger->error("Failed to report IP {$ip}: " . $e->getMessage());
+            }
+        }
+    }
+
+    /**
+     * Map Fail2Ban jail names to API categories
+     *
+     * @param string $jail Jail name
+     * @return array Categories for the API
+     */
+    private function getIPCategoriesFromJail(string $jail): array
+    {
+        // Map jail names to appropriate categories
+        // Category IDs are assumed based on common security classifications:
+        // 1: Spam, 2: Phishing, 3: Malware, 4: Brute Force, 5: DDoS, 6: Web Attack, 7: Scanner, 8: Authentication
+        $jailCategoryMap = [
+            'sshd' => [4, 8],          // Brute Force, Authentication
+            'postfix' => [1, 4],        // Spam, Brute Force
+            'dovecot' => [4, 8],        // Brute Force, Authentication
+            'apache' => [6, 7],         // Web Attack, Scanner
+            'nginx' => [6, 7],          // Web Attack, Scanner
+            'wordpress' => [6, 4],      // Web Attack, Brute Force
+            'proftpd' => [4, 8],        // Brute Force, Authentication
+            'postfix-sasl' => [1, 4, 8], // Spam, Brute Force, Authentication
+            'cyberattack' => [3, 5, 7]  // Malware, DDoS, Scanner
+        ];
+
+        // Return mapped categories or default
+        return $jailCategoryMap[strtolower($jail)] ?? [4]; // Default to Brute Force
+    }
 
 
 
