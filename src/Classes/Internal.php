@@ -32,6 +32,7 @@ class Internal
                 $this->setupDatabase();
                 break;
             case 'report-ip':
+                echo "Debug - Received args: " . json_encode($args) . "\n";
                 $this->reportIp($args['ip'] ?? null, $args['jail'] ?? 'unknown', $args['reason'] ?? 'Manual report');
                 break;
 
