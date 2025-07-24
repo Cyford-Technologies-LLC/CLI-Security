@@ -162,15 +162,14 @@ class Postfix
         $subject = $headers['Subject'] ?? '';
 
         // WHITELIST CHECK - Skip all spam checks if whitelisted
-        $logger->info("Checking  whitelisted");
+        $logger->info("Checking  black listed");
         if ($this->isBlacklisted($headers, $emailData, $senderIp, $logger)) {
             $logger->info("Email is blacklisted, rejecting");
             $spamReason = "Email is blacklisted";
             $this->handleSpamEmail($emailData, $headers, $recipient, $spamReason, $logger);
             return;
-            exit(1); // Exit with code 1 for Postfix to reject the message
         }
-
+        $logger->info("Checking  whitelisted");
 
         if ($this->isWhitelisted($headers, $emailData, $senderIp, $logger)) {
             $logger->info("Email is whitelisted, skipping spam checks and delivering directly");
