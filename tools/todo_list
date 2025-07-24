@@ -1,7 +1,8 @@
 
 1  enforce whitelist
 2  enforce blacklist
-3  change server  to bring ip reputation and include this when rating emails
-4  fix other rate issues from server
-5  fix admin in server
-6  add  client admin  spam diag  from user dir
+3  spam doesnt work for alias
+4  change server  to bring ip reputation and include this when rating emails
+5  fix other rate issues from server
+6  fix admin in server
+7  add  client admin  spam diag  from user dir
