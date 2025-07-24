@@ -1999,6 +1999,35 @@ EOF;
             '/etc/postfix/aliases'
         ];
 
+        // Additional check for main.cf virtual_alias_maps
+        $mainCfFile = '/etc/postfix/main.cf';
+        if (file_exists($mainCfFile)) {
+            $content = file_get_contents($mainCfFile);
+
+            // Extract virtual_alias_maps
+            if (preg_match('/virtual_alias_maps\s*=\s*(.+)$/m', $content, $matches)) {
+                $mapsSetting = trim($matches[1]);
+
+                // Parse the maps setting
+                $mapEntries = explode(',', $mapsSetting);
+                foreach ($mapEntries as $entry) {
+                    $entry = trim($entry);
+
+                    // Handle hash files
+                    if (preg_match('/hash:(.+)/', $entry, $matches)) {
+                        $aliasFiles[] = trim($matches[1]);
+                    }
+                    // Handle plain files
+                    else if (strpos($entry, ':') === false) {
+                        $aliasFiles[] = $entry;
+                    }
+                }
+            }
+        }
+
+        // Array to collect all targets from all files
+        $allTargets = [];
+
         foreach ($aliasFiles as $aliasFile) {
             if (file_exists($aliasFile)) {
                 $logger->info("Checking alias file: $aliasFile");
@@ -2018,35 +2047,59 @@ EOF;
 
                     list($aliasAddress, $targetAddresses) = $parts;
 
+                    // Check for domain-level alias
+                    $isDomainAlias = $aliasAddress === '@' . $domain;
+
                     // Normalize to match our format if needed
-                    if (strpos($aliasAddress, '@') === false && strpos($recipient, '@' . $domain) !== false) {
+                    if (strpos($aliasAddress, '@') === false && !$isDomainAlias) {
+                        // Check for local part alias (no domain)
+                        if ($aliasAddress === $localPart) {
+                            $logger->info("Found local part alias: $aliasAddress => $targetAddresses");
+                            // Split multiple targets and trim whitespace
+                            $targets = array_map('trim', explode(',', $targetAddresses));
+                            $allTargets = array_merge($allTargets, $targets);
+                            continue;
+                        }
+
+                        // Add domain for comparison
                         $aliasAddress .= '@' . $domain;
                     }
 
-                    // Check if this matches our alias
-                    if ($aliasAddress === $recipient || $aliasAddress === $localPart) {
-                        $logger->info("Found alias mapping: $aliasAddress => $targetAddresses");
-
+                    // Check for exact address match
+                    if ($aliasAddress === $recipient) {
+                        $logger->info("Found exact alias mapping: $aliasAddress => $targetAddresses");
                         // Split multiple targets and trim whitespace
                         $targets = array_map('trim', explode(',', $targetAddresses));
+                        $allTargets = array_merge($allTargets, $targets);
+                        continue;
+                    }
 
-                        // Ensure each target has a domain if needed
-                        foreach ($targets as &$target) {
-                            if (strpos($target, '@') === false) {
-                                $target .= '@' . $domain;
-                            }
-                        }
-
-                        $logger->info("Alias targets: " . implode(', ', $targets));
-                        return $targets;
+                    // Check for domain level alias
+                    if ($isDomainAlias) {
+                        $logger->info("Found domain alias: $aliasAddress => $targetAddresses");
+                        // Split multiple targets and trim whitespace
+                        $targets = array_map('trim', explode(',', $targetAddresses));
+                        $allTargets = array_merge($allTargets, $targets);
+                        continue;
                     }
                 }
             }
         }
 
-        $logger->info("$recipient is not an alias");
-        return [];
-    }
+        // Ensure each target has a domain if needed
+        foreach ($allTargets as &$target) {
+            if (strpos($target, '@') === false) {
+                $target .= '@' . $domain;
+            }
+        }
 
+        if (!empty($allTargets)) {
+            $logger->info("Found alias targets for $recipient: " . implode(', ', $allTargets));
+        } else {
+            $logger->info("$recipient is not an alias");
+        }
+
+        return $allTargets;
+    }
 
 }
