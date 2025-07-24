@@ -483,6 +483,7 @@ class ApiClient
         // Prepare request parameters
         $params = [
             'ips' => $ip,
+            'IP' => $ip,
             'categories' => $categoriesParam,
             'source' => $source
         ];
