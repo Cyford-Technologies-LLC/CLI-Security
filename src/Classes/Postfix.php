@@ -1990,6 +1990,7 @@ EOF;
         $domain = substr(strstr($recipient, '@'), 1);
 
         $logger->info("Checking if $recipient is an alias");
+        $logger->info("Local part: $localPart, Domain: $domain");
 
         // List of potential alias files to check
         $aliasFiles = [
@@ -1999,90 +2000,92 @@ EOF;
             '/etc/postfix/aliases'
         ];
 
-        // Additional check for main.cf virtual_alias_maps
-        $mainCfFile = '/etc/postfix/main.cf';
-        if (file_exists($mainCfFile)) {
-            $content = file_get_contents($mainCfFile);
+        // Debug: check if files exist and print first few lines
+        foreach ($aliasFiles as $aliasFile) {
+            if (file_exists($aliasFile)) {
+                $logger->info("Found alias file: $aliasFile");
+                $content = file_get_contents($aliasFile);
+                // Log first 5 lines to see format
+                $lines = explode("\n", $content);
+                $sample = array_slice($lines, 0, 5);
+                $logger->info("Sample content from $aliasFile:\n" . implode("\n", $sample));
+            } else {
+                $logger->info("Alias file does not exist: $aliasFile");
+            }
+        }
 
-            // Extract virtual_alias_maps
-            if (preg_match('/virtual_alias_maps\s*=\s*(.+)$/m', $content, $matches)) {
-                $mapsSetting = trim($matches[1]);
+        // First try: use postmap to directly query aliases (if available)
+        $allTargets = [];
 
-                // Parse the maps setting
-                $mapEntries = explode(',', $mapsSetting);
-                foreach ($mapEntries as $entry) {
-                    $entry = trim($entry);
+        // Try postmap lookup for virtual alias
+        $postmapOutput = shell_exec("postmap -q $recipient /etc/postfix/virtual 2>&1");
+        if ($postmapOutput && trim($postmapOutput) !== '') {
+            $logger->info("Postmap found alias in virtual: $postmapOutput");
+            $targets = array_map('trim', explode(',', $postmapOutput));
+            $allTargets = array_merge($allTargets, $targets);
+        }
 
-                    // Handle hash files
-                    if (preg_match('/hash:(.+)/', $entry, $matches)) {
-                        $aliasFiles[] = trim($matches[1]);
+        // Try getent for system aliases
+        $getentOutput = shell_exec("getent aliases $localPart 2>&1");
+        if ($getentOutput && trim($getentOutput) !== '') {
+            // Format is typically "alias: target1, target2"
+            if (preg_match('/^[^:]+:\s*(.+)$/', $getentOutput, $matches)) {
+                $logger->info("Getent found system alias: $getentOutput");
+                $targets = array_map('trim', explode(',', $matches[1]));
+                $allTargets = array_merge($allTargets, $targets);
+            }
+        }
+
+        // Fallback: manually parse the files
+        if (empty($allTargets)) {
+            $logger->info("No aliases found with system tools, trying manual parsing");
+
+            foreach ($aliasFiles as $aliasFile) {
+                if (file_exists($aliasFile)) {
+                    $logger->info("Checking alias file: $aliasFile");
+                    $content = file_get_contents($aliasFile);
+
+                    // Try different formats:
+
+                    // Format 1: "alias target" (space-separated)
+                    if (preg_match('/^' . preg_quote($recipient, '/') . '\s+(.+?)$/m', $content, $matches)) {
+                        $logger->info("Found space-separated alias: {$recipient} => {$matches[1]}");
+                        $targets = array_map('trim', explode(',', $matches[1]));
+                        $allTargets = array_merge($allTargets, $targets);
                     }
-                    // Handle plain files
-                    else if (strpos($entry, ':') === false) {
-                        $aliasFiles[] = $entry;
+
+                    // Format 2: "alias: target" (colon-separated)
+                    if (preg_match('/^' . preg_quote($localPart, '/') . ':\s*(.+?)$/m', $content, $matches)) {
+                        $logger->info("Found colon-separated alias: {$localPart}: {$matches[1]}");
+                        $targets = array_map('trim', explode(',', $matches[1]));
+                        $allTargets = array_merge($allTargets, $targets);
+                    }
+
+                    // Format 3: "localpart@domain target" (virtual domains)
+                    if (preg_match('/^' . preg_quote($recipient, '/') . '\s+(.+?)$/m', $content, $matches)) {
+                        $logger->info("Found virtual domain alias: {$recipient} => {$matches[1]}");
+                        $targets = array_map('trim', explode(',', $matches[1]));
+                        $allTargets = array_merge($allTargets, $targets);
+                    }
+
+                    // Format 4: @domain target (whole domain alias)
+                    if (preg_match('/^@' . preg_quote($domain, '/') . '\s+(.+?)$/m', $content, $matches)) {
+                        $logger->info("Found domain catch-all alias: @{$domain} => {$matches[1]}");
+                        $targets = array_map('trim', explode(',', $matches[1]));
+                        $allTargets = array_merge($allTargets, $targets);
                     }
                 }
             }
         }
 
-        // Array to collect all targets from all files
-        $allTargets = [];
+        // Last resort: Check if this might be a virtual user
+        $virtualUsersFile = '/etc/postfix/virtual_mailbox_maps';
+        if (file_exists($virtualUsersFile) && empty($allTargets)) {
+            $logger->info("Checking virtual users in: $virtualUsersFile");
+            $content = file_get_contents($virtualUsersFile);
 
-        foreach ($aliasFiles as $aliasFile) {
-            if (file_exists($aliasFile)) {
-                $logger->info("Checking alias file: $aliasFile");
-                $aliases = file($aliasFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-
-                foreach ($aliases as $line) {
-                    // Skip comments
-                    if (strpos(trim($line), '#') === 0) {
-                        continue;
-                    }
-
-                    // Parse alias line (format: alias target)
-                    $parts = preg_split('/\s+/', $line, 2);
-                    if (count($parts) != 2) {
-                        continue;
-                    }
-
-                    list($aliasAddress, $targetAddresses) = $parts;
-
-                    // Check for domain-level alias
-                    $isDomainAlias = $aliasAddress === '@' . $domain;
-
-                    // Normalize to match our format if needed
-                    if (strpos($aliasAddress, '@') === false && !$isDomainAlias) {
-                        // Check for local part alias (no domain)
-                        if ($aliasAddress === $localPart) {
-                            $logger->info("Found local part alias: $aliasAddress => $targetAddresses");
-                            // Split multiple targets and trim whitespace
-                            $targets = array_map('trim', explode(',', $targetAddresses));
-                            $allTargets = array_merge($allTargets, $targets);
-                            continue;
-                        }
-
-                        // Add domain for comparison
-                        $aliasAddress .= '@' . $domain;
-                    }
-
-                    // Check for exact address match
-                    if ($aliasAddress === $recipient) {
-                        $logger->info("Found exact alias mapping: $aliasAddress => $targetAddresses");
-                        // Split multiple targets and trim whitespace
-                        $targets = array_map('trim', explode(',', $targetAddresses));
-                        $allTargets = array_merge($allTargets, $targets);
-                        continue;
-                    }
-
-                    // Check for domain level alias
-                    if ($isDomainAlias) {
-                        $logger->info("Found domain alias: $aliasAddress => $targetAddresses");
-                        // Split multiple targets and trim whitespace
-                        $targets = array_map('trim', explode(',', $targetAddresses));
-                        $allTargets = array_merge($allTargets, $targets);
-                        continue;
-                    }
-                }
+            if (preg_match('/^' . preg_quote($recipient, '/') . '\s+/m', $content)) {
+                $logger->info("$recipient appears to be a virtual mailbox user, not an alias");
             }
         }
 
@@ -2101,5 +2104,4 @@ EOF;
 
         return $allTargets;
     }
-
 }
