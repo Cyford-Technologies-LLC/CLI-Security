@@ -55,8 +55,14 @@ try {
                     $args['username'] = substr($arg, 11);
                 } elseif (strpos($arg, '--password=') === 0) {
                     $args['password'] = substr($arg, 11);
+                }elseif (strpos($arg, '--ip=') === 0) {
+                    $args['ip'] = substr($arg, 5);
+                } elseif (strpos($arg, '--jail=') === 0) {
+                    $args['jail'] = substr($arg, 7);
+                } elseif (strpos($arg, '--reason=') === 0) {
+                    $args['reason'] = substr($arg, 9);
                 }
-            }
+                }
             
             $internal->processCommand($args);
             break;
