@@ -2604,6 +2604,7 @@ CONF;
 //            }
 //        }
 //    }
+
     /**
      * Report an IP address to the security API
      *
@@ -2645,17 +2646,8 @@ CONF;
             if (isset($result['status_code']) && $result['status_code'] === 200) {
                 echo "✅ Successfully reported IP {$ip}\n";
 
-                // Log to database if available
-                try {
-                    $database = new Database($this->config);
-                    // Pass the metadata as an array, not a JSON string
-                    $database->logReportedIP($ip, $jail, $reason, $metadata);
-                } catch (Exception $e) {
-                    // Just log the error but continue
-                    if ($this->logger) {
-                        $this->logger->warning("Could not log IP to database: " . $e->getMessage());
-                    }
-                }
+                // Instead of using the database class, log to a file
+                $this->logReportedIPToFile($ip, $jail, $reason, $metadata);
             } else {
                 echo "❌ Failed to report IP: " . json_encode($result) . "\n";
             }
@@ -2666,7 +2658,45 @@ CONF;
             }
         }
     }
+
     /**
+     * Log reported IP to a file instead of using the database
+     *
+     * @param string $ip IP address that was reported
+     * @param string $source Source of the report
+     * @param string $reason Reason for reporting
+     * @param array $metadata Additional metadata
+     * @return void
+     */
+    private function logReportedIPToFile(string $ip, string $source, string $reason, array $metadata): void
+    {
+        try {
+            $logDir = '/tmp/cyford-security/reported-ips';
+            if (!is_dir($logDir)) {
+                mkdir($logDir, 0755, true);
+            }
+
+            $logFile = $logDir . '/reported-ips.log';
+            $timestamp = date('Y-m-d H:i:s');
+            $metadataJson = json_encode($metadata);
+
+            $logEntry = "[{$timestamp}] IP: {$ip}, Source: {$source}, Reason: {$reason}, Metadata: {$metadataJson}\n";
+            file_put_contents($logFile, $logEntry, FILE_APPEND);
+
+            if ($this->logger) {
+                $this->logger->info("Logged reported IP {$ip} to file {$logFile}");
+            }
+        } catch (Exception $e) {
+            if ($this->logger) {
+                $this->logger->error("Failed to log reported IP to file: " . $e->getMessage());
+            }
+        }
+    }
+
+
+    /**
+     * Report an IP address to the security API
+
      * Map Fail2Ban jail names to API categories
      *
      * @param string $jail Jail name
