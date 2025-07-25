@@ -35,6 +35,9 @@ class Internal
             case 'setup-fail2ban':
                 $this->setupFail2Ban();
                 break;
+            case 'report-jailed-ips':
+                $this->reportJailedIps($args);
+                break;
 
             case 'report-ip':
                 echo "Debug - Received args: " . json_encode($args) . "\n";
@@ -2630,7 +2633,100 @@ CONF;
     }
 
 
+    /**
+     * Scan all Fail2Ban jails for banned IPs and report them to the API
+     *
+     * @param array $args Command arguments (optional)
+     */
+    private function reportJailedIps(array $args = []): void
+    {
+        try {
+            require_once __DIR__ . '/Fail2Ban.php';
+            $fail2Ban = new \Cyford\Security\Classes\Fail2Ban();
 
+            echo "🔍 Scanning Fail2Ban jails for banned IPs...\n";
+
+            // Get all jails
+            $jails = $fail2Ban->getEnabledJails();
+            if (empty($jails)) {
+                echo "ℹ️ No enabled Fail2Ban jails found.\n";
+                return;
+            }
+
+            echo "📋 Found " . count($jails) . " enabled jails: " . implode(', ', $jails) . "\n";
+
+            $totalIps = 0;
+            $reportedIps = 0;
+            $skippedIps = 0;
+            $failedIps = 0;
+
+            // Process each jail
+            foreach ($jails as $jail) {
+                echo "📊 Processing jail: $jail\n";
+
+                try {
+                    // Get jail status including banned IPs
+                    $status = $fail2Ban->getJailStatus($jail);
+                    $bannedIps = $status['banned_ips'] ?? [];
+
+                    if (empty($bannedIps)) {
+                        echo "  ℹ️ No banned IPs in jail: $jail\n";
+                        continue;
+                    }
+
+                    echo "  🔒 Found " . count($bannedIps) . " banned IPs in jail: $jail\n";
+                    $totalIps += count($bannedIps);
+
+                    // Report each IP
+                    foreach ($bannedIps as $ip) {
+                        echo "  🌐 Reporting IP: $ip from jail: $jail... ";
+
+                        try {
+                            // Call the reportIp method
+                            $result = $this->reportIp(
+                                $ip,
+                                $jail,
+                                "Banned by Fail2Ban ($jail)"
+                            );
+
+                            if ($result) {
+                                echo "✅\n";
+                                $reportedIps++;
+                            } else {
+                                echo "❌\n";
+                                $failedIps++;
+                            }
+                        } catch (Exception $e) {
+                            echo "❌ Error: " . $e->getMessage() . "\n";
+                            $failedIps++;
+                        }
+                    }
+                } catch (Exception $e) {
+                    echo "❌ Error processing jail $jail: " . $e->getMessage() . "\n";
+                }
+            }
+
+            // Summary
+            echo "\n📝 Summary:\n";
+            echo "  📊 Total banned IPs found: $totalIps\n";
+            echo "  ✅ Successfully reported: $reportedIps\n";
+            echo "  ⚠️ Skipped (already reported): $skippedIps\n";
+            echo "  ❌ Failed to report: $failedIps\n";
+
+            if ($totalIps === 0) {
+                echo "\nℹ️ No banned IPs found in any jail.\n";
+            } elseif ($reportedIps === $totalIps) {
+                echo "\n✅ All banned IPs were successfully reported!\n";
+            } else {
+                echo "\n⚠️ Some IPs could not be reported. Check the logs for details.\n";
+            }
+        } catch (Exception $e) {
+            echo "❌ Error scanning jails: " . $e->getMessage() . "\n";
+            if (isset($this->logger)) {
+                $this->logger->error("Failed to scan jails: " . $e->getMessage());
+            }
+        }
+    }
 
 
 
