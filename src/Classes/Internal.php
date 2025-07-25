@@ -2435,77 +2435,6 @@ SIEVE;
      * @param string $scriptPath Path to your script
      * @return bool Success status
      */
-    public function setupScriptReporting(string $scriptPath = "/usr/local/share/cyford/security/index.php"): bool
-    {
-        // Create a custom action configuration for Fail2Ban
-        $actionFile = '/etc/fail2ban/action.d/cyford-report-script.conf';
-
-        // Create the action configuration content
-        $actionContent = <<<CONF
-[Definition]
-actionstart = 
-actionstop = 
-actioncheck = 
-actionban = /usr/bin/php $scriptPath --input_type=internal --command=report-ip --ip=<ip> --jail=<name> --reason="Banned by Fail2Ban"
-actionunban = 
-
-[Init]
-CONF;
-
-        try {
-            // Write the action configuration file
-            if (file_put_contents($actionFile, $actionContent) === false) {
-                throw new RuntimeException("Failed to create action configuration file: {$actionFile}");
-            }
-
-            // Update jail.local to include the new action
-            $jailLocalFile = '/etc/fail2ban/jail.local';
-            $jailLocalContent = '';
-
-            if (file_exists($jailLocalFile)) {
-                $jailLocalContent = file_get_contents($jailLocalFile);
-                if ($jailLocalContent === false) {
-                    throw new RuntimeException("Failed to read jail.local file: {$jailLocalFile}");
-                }
-            } else {
-                // Create the directory if it doesn't exist
-                $jailDir = dirname($jailLocalFile);
-                if (!file_exists($jailDir) && !mkdir($jailDir, 0755, true)) {
-                    throw new RuntimeException("Failed to create directory for jail.local: {$jailDir}");
-                }
-            }
-
-            // Check if we need to add the global configuration
-            if (strpos($jailLocalContent, 'cyford-report-script') === false) {
-                // If the file is empty or missing a [DEFAULT] section, create it
-                if (empty($jailLocalContent) || strpos($jailLocalContent, '[DEFAULT]') === false) {
-                    $jailLocalContent .= "[DEFAULT]\n";
-                } else {
-                    // Otherwise, append to the existing content
-                    $jailLocalContent .= "\n\n";
-                }
-
-                // Add global configuration to use our action
-                $jailLocalContent .= "# Cyford IP reporting action\n";
-                $jailLocalContent .= "action = %(action_)s\n";
-                $jailLocalContent .= "         cyford-report-script\n";
-
-                // Write the updated jail.local file
-                if (file_put_contents($jailLocalFile, $jailLocalContent) === false) {
-                    throw new RuntimeException("Failed to update jail.local configuration file");
-                }
-            }
-
-            // Restart Fail2Ban to apply changes
-            return $this->restart();
-        } catch (RuntimeException $e) {
-            // Log the error
-            error_log('Failed to set up script reporting: ' . $e->getMessage());
-            return false;
-        }
-    }
-
-
     /**
      * Set up script reporting for Fail2Ban
      * This creates a custom action that will call our script when an IP is banned
@@ -2582,6 +2511,26 @@ CONF;
             return false;
         }
     }
+
+    /**
+     * Restart the Fail2Ban service
+     *
+     * @return bool Success status
+     */
+    public function restart(): bool
+    {
+        $command = 'systemctl restart fail2ban 2>&1';
+        exec($command, $output, $returnCode);
+
+        if ($returnCode !== 0) {
+            error_log('Failed to restart Fail2Ban: ' . implode("\n", $output));
+            return false;
+        }
+
+        return true;
+    }
+
+
 
     /**
      * Restart the Fail2Ban service
