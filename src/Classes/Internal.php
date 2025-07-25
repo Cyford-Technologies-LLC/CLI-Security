@@ -2554,7 +2554,52 @@ CONF;
             }
 
             // Check if we need to add the global configuration
-            if (strpos($jail
+            if (strpos($jailLocalContent, 'cyford-report-script') === false) {
+                // If the file is empty or missing a [DEFAULT] section, create it
+                if (empty($jailLocalContent) || strpos($jailLocalContent, '[DEFAULT]') === false) {
+                    $jailLocalContent .= "[DEFAULT]\n";
+                } else {
+                    // Otherwise, append to the existing content
+                    $jailLocalContent .= "\n\n";
+                }
+
+                // Add global configuration to use our action
+                $jailLocalContent .= "# Cyford IP reporting action\n";
+                $jailLocalContent .= "action = %(action_)s\n";
+                $jailLocalContent .= "         cyford-report-script\n";
+
+                // Write the updated jail.local file
+                if (file_put_contents($jailLocalFile, $jailLocalContent) === false) {
+                    throw new RuntimeException("Failed to update jail.local configuration file");
+                }
+            }
+
+            // Restart Fail2Ban to apply changes
+            return $this->restart();
+        } catch (RuntimeException $e) {
+            // Log the error
+            error_log('Failed to set up script reporting: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Restart the Fail2Ban service
+     *
+     * @return bool Success status
+     */
+    public function restart(): bool
+    {
+        $command = 'systemctl restart fail2ban 2>&1';
+        exec($command, $output, $returnCode);
+
+        if ($returnCode !== 0) {
+            error_log('Failed to restart Fail2Ban: ' . implode("\n", $output));
+            return false;
+        }
+
+        return true;
+    }
 
 
 
