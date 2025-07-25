@@ -739,13 +739,23 @@ class Database
      * @param bool $success Whether the report was successful
      * @return bool Success status
      */
+    /**
+     * Log reported IP information to the database
+     *
+     * @param string $ip IP address that was reported
+     * @param string $source Source of the report (e.g., 'fail2ban', 'manual')
+     * @param string $reason Reason for reporting
+     * @param array $metadata Additional metadata about the report
+     * @param bool $success Whether the report was successful
+     * @return bool Success status
+     */
     public function logReportedIP(string $ip, string $source = 'manual', string $reason = '', array $metadata = [], bool $success = true): bool
     {
         try {
             // Ensure the reported_ips table exists
             $this->createReportedIpsTableIfNotExists();
 
-            $stmt = $this->db->prepare("
+            $stmt = $this->pdo->prepare("
             INSERT INTO reported_ips (
                 ip_address, 
                 source, 
@@ -778,6 +788,61 @@ class Database
         }
     }
 
+    /**
+     * Create the reported_ips table if it doesn't exist
+     */
+    private function createReportedIpsTableIfNotExists(): void
+    {
+        $this->pdo->exec("
+        CREATE TABLE IF NOT EXISTS reported_ips (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ip_address TEXT NOT NULL,
+            source TEXT NOT NULL,
+            reason TEXT,
+            metadata TEXT,
+            reported_at DATETIME NOT NULL,
+            report_success INTEGER DEFAULT 1
+        )
+    ");
+
+        // Create an index for faster lookups
+        $this->pdo->exec("
+        CREATE INDEX IF NOT EXISTS idx_reported_ips_ip_address 
+        ON reported_ips (ip_address)
+    ");
+    }
+
+    /**
+     * Check if an IP has been reported recently
+     *
+     * @param string $ip IP address to check
+     * @param int $withinSeconds Time window in seconds to check
+     * @return bool Whether the IP has been reported recently
+     */
+    public function hasIpBeenReportedRecently(string $ip, int $withinSeconds = 86400): bool
+    {
+        try {
+            $this->createReportedIpsTableIfNotExists();
+
+            $stmt = $this->pdo->prepare("
+            SELECT COUNT(*) as count 
+            FROM reported_ips 
+            WHERE ip_address = ? 
+            AND reported_at > datetime('now', '-' || ? || ' seconds')
+            AND report_success = 1
+        ");
+
+            $stmt->execute([$ip, $withinSeconds]);
+            $result = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+            return ($result['count'] > 0);
+        } catch (\PDOException $e) {
+            if (isset($this->logger)) {
+                $this->logger->error("Failed to check reported IP: " . $e->getMessage());
+            }
+            return false;
+        }
+    }
     /**
      * Create the reported_ips table if it doesn't exist
      */
