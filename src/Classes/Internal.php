@@ -2638,10 +2638,16 @@ CONF;
      *
      * @param array $args Command arguments (optional)
      */
+    /**
+     * Scan all Fail2Ban jails for banned IPs and report them to the API
+     *
+     * @param array $args Command arguments (optional)
+     */
     private function reportJailedIps(array $args = []): void
     {
         try {
             require_once __DIR__ . '/Fail2Ban.php';
+
             $fail2Ban = new \Cyford\Security\Classes\Fail2Ban();
 
             echo "🔍 Scanning Fail2Ban jails for banned IPs...\n";
@@ -2682,22 +2688,12 @@ CONF;
                         echo "  🌐 Reporting IP: $ip from jail: $jail... ";
 
                         try {
-                            // Call the reportIp method
-                            $result = $this->reportIp(
-                                $ip,
-                                $jail,
-                                "Banned by Fail2Ban ($jail)"
-                            );
-
-                            if ($result) {
-                                echo "✅\n";
-                                $reportedIps++;
-                            } else {
-                                echo "❌\n";
-                                $failedIps++;
-                            }
+                            // Use the existing reportIp method
+                            echo "🔍 Reporting IP $ip from jail $jail...\n";
+                            $this->reportIp($ip, $jail, "Banned by Fail2Ban ($jail)");
+                            $reportedIps++;
                         } catch (Exception $e) {
-                            echo "❌ Error: " . $e->getMessage() . "\n";
+                            echo "❌ Error reporting IP: " . $e->getMessage() . "\n";
                             $failedIps++;
                         }
                     }
@@ -2727,7 +2723,6 @@ CONF;
             }
         }
     }
-
 
 
 
