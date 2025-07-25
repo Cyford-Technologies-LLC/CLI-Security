@@ -3,6 +3,7 @@ namespace Cyford\Security\Classes;
 
 use Exception;
 use Cyford\Security\Classes\ApiClient;
+use RuntimeException;
 
 class Internal
 {
@@ -31,6 +32,10 @@ class Internal
             case 'setup-database':
                 $this->setupDatabase();
                 break;
+            case 'setup-fail2ban':
+                $this->setupFail2Ban();
+                break;
+
             case 'report-ip':
                 echo "Debug - Received args: " . json_encode($args) . "\n";
                 $this->reportIp($args['ip'] ?? null, $args['jail'] ?? 'unknown', $args['reason'] ?? 'Manual report');
@@ -2335,6 +2340,95 @@ SIEVE;
         return $returnCode === 0;
     }
 
+
+
+    /**
+     * Set up Fail2Ban integration with our security script
+     * This creates necessary Fail2Ban configuration files to automatically report banned IPs
+     */
+    private function setupFail2Ban(): void
+    {
+        try {
+            require_once __DIR__ . '/Fail2Ban.php';
+            $fail2Ban = new \Cyford\Security\Classes\Fail2Ban();
+
+            // Find the path to the current script
+            $scriptPath = $_SERVER['SCRIPT_FILENAME'] ?? null;
+            if (!$scriptPath) {
+                // Try to determine script path
+                $scriptPath = realpath(__DIR__ . '/../../index.php');
+            }
+
+            if (!file_exists($scriptPath)) {
+                echo "❌ Could not determine script path\n";
+                return;
+            }
+
+            echo "🔧 Setting up Fail2Ban reporting to script: $scriptPath\n";
+
+            // Files we will modify
+            $actionFile = '/etc/fail2ban/action.d/cyford-report-script.conf';
+            $jailLocalFile = '/etc/fail2ban/jail.local';
+
+            // Create backup directory if it doesn't exist
+            $backupDirectory = '/var/backups/cyford/fail2ban';
+            if (!file_exists($backupDirectory)) {
+                if (!mkdir($backupDirectory, 0755, true)) {
+                    throw new RuntimeException("Failed to create backup directory: {$backupDirectory}");
+                }
+                echo "📁 Created backup directory: {$backupDirectory}\n";
+            }
+
+            // Backup jail.local if it exists
+            if (file_exists($jailLocalFile)) {
+                $this->backupFile($jailLocalFile, $backupDirectory);
+            }
+
+            // Backup the action file if it exists
+            if (file_exists($actionFile)) {
+                $this->backupFile($actionFile, $backupDirectory);
+            }
+
+            $result = $fail2Ban->setupScriptReporting($scriptPath);
+
+            if ($result) {
+                echo "✅ Fail2Ban reporting set up successfully\n";
+                echo "✅ Banned IPs will now be automatically reported to the API\n";
+            } else {
+                echo "❌ Failed to set up Fail2Ban reporting\n";
+            }
+        } catch (Exception $e) {
+            echo "❌ Error setting up Fail2Ban reporting: " . $e->getMessage() . "\n";
+            if ($this->logger) {
+                $this->logger->error("Failed to set up Fail2Ban reporting: " . $e->getMessage());
+            }
+        }
+    }
+
+    /**
+     * Create a backup of a file before modifying it
+     *
+     * @param string $filePath Path to the file to backup
+     * @param string $backupDirectory Directory to store the backup
+     * @throws RuntimeException If backup fails
+     */
+    private function backupFile(string $filePath, string $backupDirectory): void
+    {
+        if (!file_exists($filePath)) {
+            echo "⚠️ File not found for backup: {$filePath}\n";
+            return;
+        }
+
+        $timestamp = date('Ymd_His');
+        $fileName = basename($filePath);
+        $backupPath = "{$backupDirectory}/{$fileName}.backup_{$timestamp}";
+
+        if (!copy($filePath, $backupPath)) {
+            throw new RuntimeException("Failed to create backup for: {$filePath}");
+        }
+
+        echo "💾 Backup created: {$backupPath}\n";
+    }
     /**
      * Set up Fail2Ban to report IPs to your script
      *
@@ -2370,12 +2464,28 @@ CONF;
 
             if (file_exists($jailLocalFile)) {
                 $jailLocalContent = file_get_contents($jailLocalFile);
+                if ($jailLocalContent === false) {
+                    throw new RuntimeException("Failed to read jail.local file: {$jailLocalFile}");
+                }
+            } else {
+                // Create the directory if it doesn't exist
+                $jailDir = dirname($jailLocalFile);
+                if (!file_exists($jailDir) && !mkdir($jailDir, 0755, true)) {
+                    throw new RuntimeException("Failed to create directory for jail.local: {$jailDir}");
+                }
             }
 
             // Check if we need to add the global configuration
             if (strpos($jailLocalContent, 'cyford-report-script') === false) {
+                // If the file is empty or missing a [DEFAULT] section, create it
+                if (empty($jailLocalContent) || strpos($jailLocalContent, '[DEFAULT]') === false) {
+                    $jailLocalContent .= "[DEFAULT]\n";
+                } else {
+                    // Otherwise, append to the existing content
+                    $jailLocalContent .= "\n\n";
+                }
+
                 // Add global configuration to use our action
-                $jailLocalContent .= "\n\n[DEFAULT]\n";
                 $jailLocalContent .= "# Cyford IP reporting action\n";
                 $jailLocalContent .= "action = %(action_)s\n";
                 $jailLocalContent .= "         cyford-report-script\n";
@@ -2394,7 +2504,6 @@ CONF;
             return false;
         }
     }
-
 
 
 
