@@ -2389,7 +2389,7 @@ SIEVE;
                 $this->backupFile($actionFile, $backupDirectory);
             }
 
-            $result = $fail2Ban->setupScriptReporting($scriptPath);
+            $result = $this->setupScriptReporting($scriptPath);
 
             if ($result) {
                 echo "✅ Fail2Ban reporting set up successfully\n";
