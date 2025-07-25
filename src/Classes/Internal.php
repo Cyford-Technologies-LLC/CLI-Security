@@ -2537,18 +2537,7 @@ CONF;
      *
      * @return bool Success status
      */
-    public function restart(): bool
-    {
-        $command = 'systemctl restart fail2ban 2>&1';
-        exec($command, $output, $returnCode);
 
-        if ($returnCode !== 0) {
-            error_log('Failed to restart Fail2Ban: ' . implode("\n", $output));
-            return false;
-        }
-
-        return true;
-    }
 
 
 
