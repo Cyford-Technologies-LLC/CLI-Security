@@ -2359,7 +2359,7 @@ SIEVE;
             $scriptPath = $_SERVER['SCRIPT_FILENAME'] ?? null;
             if (!$scriptPath) {
                 // Try to determine script path
-                $scriptPath = realpath(__DIR__ . '/../../index.php');
+                $scriptPath = realpath( '/usr/local/share/cyford/security/index.php');
             }
 
             if (!file_exists($scriptPath)) {
