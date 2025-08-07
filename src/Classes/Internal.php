@@ -2636,7 +2636,7 @@ CONF;
             $metadata = [
                 'jail' => $jail,
                 'reason' => $reason,
-                'hostname' => gethostname(),
+//                'hostname' => gethostname(),
                 'timestamp' => time()
             ];
 
