@@ -2708,14 +2708,14 @@ CONF;
         // Category IDs are assumed based on common security classifications:
         // 1: Spam, 2: Phishing, 3: Malware, 4: Brute Force, 5: DDoS, 6: Web Attack, 7: Scanner, 8: Authentication
         $jailCategoryMap = [
-            'sshd' => [4, 8],          // Brute Force, Authentication
-            'postfix' => [1, 4],        // Spam, Brute Force
-            'dovecot' => [4, 8],        // Brute Force, Authentication
+            'sshd' => [22, 8],          // Brute Force, Authentication
+            'postfix' => [7, 1, 11],        // Spam, Brute Force
+            'dovecot' => [4, 15,11],        // Brute Force, Authentication
             'apache' => [6, 7],         // Web Attack, Scanner
             'nginx' => [6, 7],          // Web Attack, Scanner
             'wordpress' => [6, 4],      // Web Attack, Brute Force
-            'proftpd' => [4, 8],        // Brute Force, Authentication
-            'postfix-sasl' => [1, 4, 8], // Spam, Brute Force, Authentication
+            'proftpd' => [4],        // Brute Force, Authentication
+            'postfix-sasl' => [7, 15, 11], // Spam, Brute Force, Authentication
             'cyberattack' => [3, 5, 7]  // Malware, DDoS, Scanner
         ];
 
