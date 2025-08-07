@@ -481,6 +481,9 @@ class ApiClient
         $categoriesParam = is_array($categories) ? implode(',', $categories) : $categories;
         $metadataString = json_encode($metadata);
 
+        $this->logger->info("report ip  meta data:  $metadataString");
+
+
 
         // Prepare request parameters
         $params = [
