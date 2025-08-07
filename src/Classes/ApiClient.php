@@ -488,6 +488,7 @@ class ApiClient
             'IP' => $ip,
             'categories' => $categoriesParam,
             'Comment' => $metadataString,
+            'comment' => $metadataString,
             'data' => $metadataString,
             'source' => $source
         ];
@@ -509,6 +510,7 @@ class ApiClient
             'IP' => $ip,              // Important: Use 'IP' instead of 'ips' as URL parameter
             'categories' => $categoriesParam,
             'Comment' => $metadataString,
+            'comment' => $metadataString,
             'data' => $metadataString,
             'source' => $source
         ];
