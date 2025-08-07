@@ -479,12 +479,15 @@ class ApiClient
 
         // Convert categories to comma-separated string if needed
         $categoriesParam = is_array($categories) ? implode(',', $categories) : $categories;
+        $metadataString = json_encode($metadata);
+
 
         // Prepare request parameters
         $params = [
             'ips' => $ip,
             'IP' => $ip,
             'categories' => $categoriesParam,
+            'comment' => $metadataString,
             'source' => $source
         ];
 
