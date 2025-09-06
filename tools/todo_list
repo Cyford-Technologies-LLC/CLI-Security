@@ -9,7 +9,12 @@
 
 
 
+
+
 8  integrate fail2ban
 9  integrate firewalld / iptables
 10 start reporting better / aggressive
 
+Important*************
+
+selinux  is not setup to allow postfix to execute php
