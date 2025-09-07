@@ -1,76 +1,86 @@
-# Cyford Security Mail Stack
-FROM ubuntu:22.04
+# Use a non-root user for security
+FROM python:3.11-slim
 
-# Prevent interactive prompts
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Add fail2ban and iptables for testing
-RUN apt-get update && apt-get install -y fail2ban iptables && \
-    echo '[postfix]' > /etc/fail2ban/jail.local && \
-    echo 'enabled = true' >> /etc/fail2ban/jail.local && \
-    echo '[dovecot]' >> /etc/fail2ban/jail.local && \
-    echo 'enabled = true' >> /etc/fail2ban/jail.local
-
-# Install packages (without squirrelmail)
-RUN apt-get update && apt-get install -y \
-    postfix \
-    dovecot-core \
-    dovecot-imapd \
-    dovecot-pop3d \
-    php8.1 \
-    php8.1-cli \
-    php8.1-sqlite3 \
-    php8.1-curl \
-    php8.1-imap \
-    apache2 \
-    fail2ban \
-    iptables \
-    git \
+# Install system dependencies, including gosu for user switching
+# and tools for installing Docker and Composer
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    wget \
     nano \
-    supervisor \
-    sudo \
+    git \
+    gnupg \
+    gosu \
+    php-cli \
+    php-zip \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# Create required users
-RUN useradd -r -s /bin/false report-ip
+# --- Docker CLI and Compose Plugin Installation ---
+# Add Docker's official GPG key
+RUN install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && chmod a+r /etc/apt/keyrings/docker.gpg
 
-# Create directory structure
-RUN mkdir -p /usr/local/share/cyford/security \
-    && mkdir -p /var/log/cyford-security \
-    && mkdir -p /var/spool/cyford-security
+# Add the Docker repository to Apt sources
+RUN echo \
+    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
+    trixie stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-# Copy CLI Security files
-COPY . /usr/local/share/cyford/security/
+# Install Docker CLI and Compose plugin
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    docker-ce-cli \
+    docker-compose-plugin \
+    && rm -rf /var/lib/apt/lists/*
 
-# Set permissions
-RUN chown -R report-ip:report-ip /usr/local/share/cyford/security \
-    && chown -R report-ip:report-ip /var/log/cyford-security \
-    && chmod -R 755 /usr/local/share/cyford/security
+# Create symbolic link for docker binary to ensure it's in the PATH
+RUN ln -s /usr/bin/docker /usr/local/bin/docker
+# --- End Docker CLI and Compose Plugin Installation ---
 
-# Create simple webmail interface
-RUN echo '<?php phpinfo(); ?>' > /var/www/html/index.php \
-    && chown -R www-data:www-data /var/www/html
 
-# Create supervisor config
-RUN echo '[supervisord]' > /etc/supervisor/conf.d/mailstack.conf \
-    && echo 'nodaemon=true' >> /etc/supervisor/conf.d/mailstack.conf \
-    && echo '' >> /etc/supervisor/conf.d/mailstack.conf \
-    && echo '[program:postfix]' >> /etc/supervisor/conf.d/mailstack.conf \
-    && echo 'command=/usr/sbin/postfix start-fg' >> /etc/supervisor/conf.d/mailstack.conf \
-    && echo 'autorestart=true' >> /etc/supervisor/conf.d/mailstack.conf \
-    && echo '' >> /etc/supervisor/conf.d/mailstack.conf \
-    && echo '[program:dovecot]' >> /etc/supervisor/conf.d/mailstack.conf \
-    && echo 'command=/usr/sbin/dovecot -F' >> /etc/supervisor/conf.d/mailstack.conf \
-    && echo 'autorestart=true' >> /etc/supervisor/conf.d/mailstack.conf \
-    && echo '' >> /etc/supervisor/conf.d/mailstack.conf \
-    && echo '[program:apache2]' >> /etc/supervisor/conf.d/mailstack.conf \
-    && echo 'command=/usr/sbin/apache2ctl -DFOREGROUND' >> /etc/supervisor/conf.d/mailstack.conf \
-    && echo 'autorestart=true' >> /etc/supervisor/conf.d/mailstack.conf
+# --- PHP Composer Installation ---
+# Install PHP Composer globally
+RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+# --- End PHP Composer Installation ---
 
-# Expose ports
-EXPOSE 25 110 143 993 995 80
+# --- Non-root User and Environment Setup ---
+# Add a non-root user and create their home directory
+# Use a consistent UID, e.g., 999
+RUN groupadd -r appuser -g 999 && useradd --no-log-init -r -m -u 999 -g 999 appuser
 
-# Start supervisor
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/mailstack.conf"]
+# Set the working directory
+WORKDIR /app
+
+# Copy and setup entrypoint script as root
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# --- FIX: Create venv as root and fix ownership ---
+# Install dependencies, leveraging build cache
+COPY requirements.txt .
+
+# Use a virtual environment to isolate dependencies inside the working directory
+# Perform this as root, then change ownership to appuser.
+RUN python -m venv /app/venv
+RUN chown -R appuser:appuser /app/venv
+# --- END FIX ---
+
+# --- Begin user-level operations ---
+# Switch to the non-root user
+USER appuser
+
+# Activate the virtual environment
+ENV PATH="/app/venv/bin:$PATH"
+
+# Install dependencies into the virtual environment
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application code
+COPY . .
+# --- End user-level operations ---
+
+# --- End Non-root User and Environment Setup ---
+
+# Use the entrypoint script
+ENTRYPOINT ["docker-entrypoint.sh"]
+
+# Use Gunicorn as a process manager for Uvicorn in production
+CMD ["gunicorn", "API.api:app", "--bind", "0.0.0.0:3939", "--worker-class", "uvicorn.workers.UvicornWorker", "--workers", "2", "--preload"]
