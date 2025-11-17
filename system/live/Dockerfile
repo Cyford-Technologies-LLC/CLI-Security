@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     php8.1-cli \
     php8.1-sqlite3 \
     php8.1-curl \
+    php8.1-zip \
     curl \
     wget \
     nano \
@@ -20,7 +21,11 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     gnupg \
     lsb-release \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Composer
+RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
 # Add Docker group (GID 999 is common for Docker)
 RUN groupadd -g 999 docker || true
@@ -41,12 +46,21 @@ RUN chown -R report-ip:report-ip /var/log/cyford-security \
     && chown -R report-ip:postfix /var/spool/cyford-security \
     && chmod -R 775 /var/spool/cyford-security
 
+# Copy project files for composer install
+COPY ../../composer.json ../../composer.lock* /tmp/composer/
+WORKDIR /tmp/composer
+RUN composer install --no-dev --optimize-autoloader
+
 # Copy initialization script
 COPY live-setup.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/live-setup.sh
 
 # Set working directory
 WORKDIR /opt/cyford/security
+
+# Copy vendor directory from build
+RUN mkdir -p /opt/cyford/security/vendor
+COPY --from=0 /tmp/composer/vendor /opt/cyford/security/vendor
 
 # Start with initialization
 CMD ["/usr/local/bin/live-setup.sh"]
