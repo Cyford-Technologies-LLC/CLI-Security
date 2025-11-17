@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   cyford-security:
-    build: .
+    build:
+      context: ../../
+      dockerfile: system/live/Dockerfile
     container_name: CLI-Security
     hostname: security.cyford.local
     volumes:

@@ -47,12 +47,12 @@ RUN chown -R report-ip:report-ip /var/log/cyford-security \
     && chmod -R 775 /var/spool/cyford-security
 
 # Copy project files for composer install
-COPY ../../composer.json ../../composer.lock* /opt/cyford/security/
+COPY composer.json composer.lock* /opt/cyford/security/
 WORKDIR /opt/cyford/security
 RUN composer install --no-dev --optimize-autoloader
 
 # Copy initialization script
-COPY live-setup.sh /usr/local/bin/
+COPY system/live/live-setup.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/live-setup.sh
 
 # Start with initialization
