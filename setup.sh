@@ -105,23 +105,16 @@ install_docker() {
     print_warning "Please log out and back in for Docker group changes to take effect"
 }
 
-# Install Docker Compose (standalone)
-install_docker_compose() {
-    if command -v docker-compose >/dev/null 2>&1; then
-        print_success "Docker Compose already installed: $(docker-compose --version)"
+# Check Docker Compose
+check_docker_compose() {
+    if docker compose version >/dev/null 2>&1; then
+        print_success "Docker Compose V2 available: $(docker compose version --short)"
+        return 0
+    elif command -v docker-compose >/dev/null 2>&1; then
+        print_success "Docker Compose V1 available: $(docker-compose --version)"
         return 0
     fi
-    
-    print_info "Installing Docker Compose..."
-    
-    # Download latest version
-    COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep 'tag_name' | cut -d\" -f4)
-    sudo curl -L "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-    
-    # Make executable
-    sudo chmod +x /usr/local/bin/docker-compose
-    
-    print_success "Docker Compose installed: $(docker-compose --version)"
+    return 1
 }
 
 # Setup .env file from .env.example
@@ -219,8 +212,8 @@ deploy_testing() {
     
     cd system/testing
     
-    # Build and start
-    docker-compose up -d --build
+    # Build and start (use Docker Compose V2 syntax)
+    docker compose up -d --build
     
     print_success "Testing environment started"
     print_info "Waiting for services to initialize..."
@@ -248,8 +241,8 @@ deploy_live() {
     
     cd system/live
     
-    # Build and start
-    docker-compose up -d --build
+    # Build and start (use Docker Compose V2 syntax)
+    docker compose up -d --build
     
     print_success "Live environment started"
     print_info "Initializing system..."
@@ -295,7 +288,7 @@ main() {
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             install_docker
-            install_docker_compose
+            check_docker_compose
         else
             print_info "Skipping Docker installation"
         fi
