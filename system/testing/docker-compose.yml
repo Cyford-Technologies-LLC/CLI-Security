@@ -16,6 +16,7 @@ services:
       - mail_data:/var/mail
       - mail_logs:/var/log
       - ../../:/opt/cyford/security
+      - ../../.env:/opt/cyford/security/.env
     environment:
       - HOSTNAME=mail.cyford.local
       - DOMAIN=cyford.local

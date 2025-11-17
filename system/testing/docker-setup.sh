@@ -1,9 +1,18 @@
 #!/bin/bash
 echo "🚀 Setting up Cyford Security Mail Stack..."
 
+# Check .env file
+echo "🔧 Checking configuration..."
+cd /opt/cyford/security
+if [ ! -f ".env" ]; then
+    echo "❌ .env file not found. Please create it from .env.example"
+    echo "ℹ️  Run: cp .env.example .env && edit .env with your credentials"
+    exit 1
+fi
+echo "✅ .env file found"
+
 # Setup permissions
 echo "📋 Setting up permissions..."
-cd /opt/cyford/security
 php index.php --input_type=internal --command=setup-permissions
 
 # Setup database

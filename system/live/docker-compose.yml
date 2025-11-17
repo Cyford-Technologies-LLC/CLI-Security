@@ -7,6 +7,7 @@ services:
     hostname: security.cyford.local
     volumes:
       - ../../:/opt/cyford/security
+      - ../../.env:/opt/cyford/security/.env
       - /var/run/docker.sock:/var/run/docker.sock
       - /usr/bin/docker:/usr/bin/docker:ro
       - /var/spool/postfix:/var/spool/postfix
@@ -20,25 +21,19 @@ services:
       - /var/run/dbus:/var/run/dbus:ro
     environment:
       - DOCKER_ENV=true
-      - POSTFIX_HOST=postfix-container
     privileged: true
     network_mode: host
     restart: unless-stopped
-    depends_on:
-      - postfix-integration
 
-  postfix-integration:
-    image: alpine:latest
-    container_name: postfix-integration
-    command: tail -f /dev/null
-    volumes:
-      - postfix_spool:/var/spool/postfix
-    networks:
-      - cyford-network
+#  postfix-integration:
+#    image: alpine:latest
+#    container_name: postfix-integration
+#    command: tail -f /dev/null
+#    volumes:
+#      - postfix_spool:/var/spool/postfix
+#    networks:
+#      - cyford-network
 
 networks:
   cyford-network:
     driver: bridge
-
-volumes:
-  postfix_spool:

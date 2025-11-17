@@ -49,31 +49,50 @@ check_docker() {
 install_docker() {
     print_info "Installing Docker..."
     
-    # Remove old versions
-    sudo apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
-    
-    # Update package index
-    sudo apt-get update
-    
-    # Install prerequisites
-    sudo apt-get install -y \
-        ca-certificates \
-        curl \
-        gnupg \
-        lsb-release
-    
-    # Add Docker's official GPG key
-    sudo mkdir -p /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    
-    # Set up repository
-    echo \
-        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-        $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-    
-    # Install Docker Engine
-    sudo apt-get update
-    sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+    if command -v dnf >/dev/null 2>&1; then
+        # Rocky/RHEL/CentOS installation
+        print_info "Detected DNF package manager (Rocky/RHEL/CentOS)"
+        
+        # Remove old versions
+        sudo dnf remove -y docker docker-client docker-client-latest docker-common docker-latest docker-latest-logrotate docker-logrotate docker-engine 2>/dev/null || true
+        
+        # Install prerequisites
+        sudo dnf install -y dnf-plugins-core
+        
+        # Add Docker repository
+        sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+        
+        # Install Docker
+        sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+        
+    elif command -v apt-get >/dev/null 2>&1; then
+        # Ubuntu/Debian installation
+        print_info "Detected APT package manager (Ubuntu/Debian)"
+        
+        # Remove old versions
+        sudo apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
+        
+        # Update package index
+        sudo apt-get update
+        
+        # Install prerequisites
+        sudo apt-get install -y ca-certificates curl gnupg lsb-release
+        
+        # Add Docker's official GPG key
+        sudo mkdir -p /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        
+        # Set up repository
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        
+        # Install Docker Engine
+        sudo apt-get update
+        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+        
+    else
+        print_error "Unsupported package manager. Please install Docker manually."
+        return 1
+    fi
     
     # Add current user to docker group
     sudo usermod -aG docker $USER
@@ -105,21 +124,48 @@ install_docker_compose() {
     print_success "Docker Compose installed: $(docker-compose --version)"
 }
 
+# Setup .env file from .env.example
+setup_env_file() {
+    if [ ! -f ".env" ]; then
+        if [ -f ".env.example" ]; then
+            cp .env.example .env
+            print_success "Created .env file from .env.example"
+            
+            # Generate unique client ID
+            CLIENT_ID=$(openssl rand -hex 32)
+            sed -i "s/API_CLIENT_ID=/API_CLIENT_ID=$CLIENT_ID/" .env
+            print_success "Generated unique API client ID"
+            
+            print_warning "Please edit .env file with your API credentials:"
+            print_info "  - API_EMAIL: Your Cyford Web Armor email"
+            print_info "  - API_PASSWORD: Your Cyford Web Armor password"
+        else
+            print_error ".env.example file not found"
+        fi
+    else
+        print_info ".env file already exists"
+    fi
+}
+
 # Setup system requirements
 setup_system() {
     print_info "Setting up system requirements..."
     
-    # Update package list
-    sudo apt-get update
-    
-    # Install required packages
-    sudo apt-get install -y \
-        php-cli \
-        php-sqlite3 \
-        php-curl \
-        curl \
-        git \
-        unzip
+    if command -v dnf >/dev/null 2>&1; then
+        # Rocky/RHEL/CentOS
+        print_info "Installing packages with DNF..."
+        sudo dnf install -y php-cli php-pdo php-curl curl git unzip openssl
+        
+    elif command -v apt-get >/dev/null 2>&1; then
+        # Ubuntu/Debian
+        print_info "Installing packages with APT..."
+        sudo apt-get update
+        sudo apt-get install -y php-cli php-sqlite3 php-curl curl git unzip openssl
+        
+    else
+        print_error "Unsupported package manager. Please install packages manually."
+        return 1
+    fi
     
     # Create report-ip user if it doesn't exist
     if ! id "report-ip" &>/dev/null; then
@@ -137,6 +183,9 @@ setup_system() {
     # Set permissions
     sudo chown -R report-ip:report-ip /var/log/cyford-security
     sudo chown -R report-ip:report-ip /var/spool/cyford-security
+    
+    # Setup .env file
+    setup_env_file
     
     print_success "System requirements installed"
 }
