@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y \
     gnupg \
     lsb-release \
     unzip \
+    firewalld \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Composer
