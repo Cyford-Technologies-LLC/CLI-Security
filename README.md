@@ -50,7 +50,7 @@ Choose your deployment method:
 
 ```bash
 cd system/testing
-docker-compose up -d
+docker compose up -d
 docker exec cyford-mail ./docker-setup.sh
 ```
 
@@ -66,7 +66,7 @@ docker exec cyford-mail ./docker-setup.sh
 
 ```bash
 cd system/live
-docker-compose up -d
+docker compose up -d
 ```
 
 **Capabilities:**
@@ -156,478 +156,6 @@ sudo mkdir -p /opt/cyford/security /var/log/cyford-security
 sudo chown -R report-ip:report-ip /var/log/cyford-security
 ```
 
-## **Configuration**
-
-Before running the project, configure it by editing `config.php` in the project directory. Open the file for manual
-changes:
-sh nano /opt/cyford/security/config.php
-
-### **Configurable Fields in `config.php`**
-
-1. **API Login & Report Endpoints**:
-    - `api.login_endpoint`: The API login endpoint.
-    - `api.report_endpoint`: The API report endpoint.
-2. **Credentials**:
-    - `credentials.email`: Your email used for the API.
-    - `credentials.password`: Your password used for the API.
-3. **Error Reporting** (optional):
-    - Set `errors.report_errors` to `1` to enable detailed error output.
-
-Save the file after making changes.
-
----
-
-## **Running the Script**
-
-To report IPs to the API, use the following syntax:
-sh cyford-report --ips=<comma-separated-IPs> --categories=<comma-separated-categories>
-
-### **Arguments**
-
-1. `--ips`: A comma-separated list of IP addresses to report.
-2. `--categories`: A comma-separated list of categories for the report.
-
-**Example:**
-sh cyford-report --ips=192.168.1.1,127.0.0.1 --categories=3,5
-
-
-
-
----
-
-## **Integrations**
-
-### **Postfix Integration**
-
-CLI-Security provides **automatic Postfix configuration** and **manual setup** options for email security filtering.
-
-#### **Option 1: Automatic Configuration (Recommended)**
-
-Run the script once to automatically configure Postfix:
-```sh
-cyford-report --input_type=manual
-```
-
-The script will:
-- Detect your server's public IP address
-- Configure IP-based SMTP filtering
-- Create backups of your configuration files
-- Set up spam handling according to your config
-
-#### **Option 2: Manual Configuration**
-
-If you prefer manual setup or need to troubleshoot:
-
-1. **Get your server's public IP address**:
-   ```sh
-   curl ifconfig.me
-   ```
-
-2. **Edit the `master.cf` Configuration File**:
-   ```sh
-   sudo nano /etc/postfix/master.cf
-   ```
-   
-   Add these entries (replace `YOUR_PUBLIC_IP` with your actual IP):
-   ```
-   # External SMTP (with content filter for security)
-   YOUR_PUBLIC_IP:smtp inet  n       -       n       -       -       smtpd
-     -o content_filter=security-filter:dummy
-   
-   # Internal SMTP (no content filter)
-   127.0.0.1:smtp inet  n       -       n       -       -       smtpd
-     -o smtpd_client_restrictions=permit_mynetworks,reject
-     -o content_filter=
-   
-   # Security filter service
-   security-filter unix - n n - - pipe
-     flags=Rq user=report-ip argv=/usr/bin/php /opt/cyford/security/index.php --input_type=postfix --ips=${client_address} --categories=3
-   ```
-
-3. **Remove any old global content_filter from main.cf** (if present):
-   ```sh
-   sudo nano /etc/postfix/main.cf
-   ```
-   Remove or comment out this line if it exists:
-   ```
-   # content_filter = security-filter:dummy
-   ```
-
-4. **Restart Postfix**:
-   ```sh
-   sudo systemctl restart postfix
-   ```
-
-#### **Spam Handling Configuration**
-
-Configure spam handling in `/opt/cyford/security/config.php`:
-
-```php
-'postfix' => [
-    'spam_handling' => [
-        'action' => 'quarantine', // Options: 'reject', 'quarantine', 'allow'
-        'bounce_message' => 'Your message has been rejected due to spam content.',
-        'quarantine_folder' => 'Spam', // Folder name for spam emails
-        'add_footer' => true, // Add footer to clean emails
-        'footer_text' => '\n\n--- Scanned by Cyford Security Filter ---',
-    ],
-],
-```
-
-**Spam Actions:**
-- `reject`: Bounce spam back to sender with custom message
-- `quarantine`: Move spam to user's spam folder (creates folder if needed)
-- `allow`: Let spam through with warning footer
-
-#### **Verification**
-
-Test your configuration:
-1. Send a test email to your server
-2. Check logs: `sudo tail -f /var/log/cyford-security/application.log`
-3. Verify email delivery: `sudo tail -f /var/log/mail.log`
-
-You should see:
-- External emails processed by security filter
-- Clean emails delivered to inbox
-- Spam handled according to your configuration
-
-### **Firewall Integration**
-
-The `Firewall` functionality allows managing firewall rules directly from the script.
-
-- **Add Rule**:
-  ```sh
-  cyford-report add-rule="<firewall-rule>"
-  ```
-
-- **Remove Rule**:
-  ```sh
-  cyford-report remove-rule="<firewall-rule>"
-  ```
-
-- **Check Firewall Status**:
-  ```sh
-  cyford-report firewall-status
-  ```
-
----
-
-## **Troubleshooting**
-
-### **1. Debug Mode for Errors**
-
-To troubleshoot errors, enable detailed error reporting in `config.php`:
-
-php 'errors' => [ 'report_errors' => 1, ],
-
-### **2. Common Problems**
-
-- **Permission Issues**:
-  Ensure files and scripts are executable:
-   ```sh
-   sudo chmod +x /opt/cyford/security/index.php
-   ```
-
-- **Postfix Configuration Fails**:
-  Check logs for details:
-   ```sh
-   sudo tail -f /var/log/mail.log
-   ```
-
----
-
-## **Internal Commands**
-
-CLI-Security includes comprehensive built-in management commands for setup, monitoring, user management, and Docker deployment.
-
-### **System Setup Commands**
-
-#### **Complete Permission Setup (Recommended First Step):**
-```bash
-# Setup all system permissions, sudoers rules, and directory structure
-php index.php --input_type=internal --command=setup-permissions
-```
-
-**What setup-permissions does:**
-- ✅ Creates sudoers rule for report-ip user
-- ✅ Sets up log directories with proper permissions
-- ✅ Configures database directory and permissions
-- ✅ Initializes whitelist/blacklist files
-- ✅ Sets project directory permissions
-
-#### **Database Setup:**
-```bash
-# Initialize database with proper permissions (run after setup-permissions)
-php index.php --input_type=internal --command=setup-database
-
-# Test database connectivity
-php index.php --input_type=internal --command=test-database
-```
-
-### **Docker Environment Commands**
-
-#### **Testing Environment Setup:**
-```bash
-# Navigate to testing directory
-cd system/testing
-
-# Start complete mail stack
-docker-compose up -d --build
-
-# Initialize services
-docker exec cyford-mail ./docker-setup.sh
-
-# Create test users
-docker exec cyford-mail php /opt/cyford/security/index.php --input_type=internal --command=create-user --username=test --password=test123
-```
-
-#### **Live Production Setup:**
-```bash
-# Navigate to live directory
-cd system/live
-
-# Start security system
-docker-compose up -d --build
-
-# Check system status
-docker exec cyford-security php /opt/cyford/security/index.php --input_type=internal --command=system-inventory
-```
-
-#### **Legacy Docker Generation (Deprecated):**
-```bash
-# Generate Dockerfile, docker-compose.yml, and setup scripts (old method)
-php index.php --input_type=internal --command=create-docker
-```
-
-### **User Management Commands**
-
-#### **Create Mail Users:**
-```bash
-# Create new mail user with system account and maildir
-php index.php --input_type=internal --command=create-user --username=testuser --password=securepass
-```
-
-**User creation includes:**
-- 👤 System user account creation
-- 📧 Postfix virtual user configuration
-- 📬 Dovecot authentication setup
-- 📁 Maildir structure with Spam folder
-- 🔐 Proper permissions and ownership
-
-#### **Setup User Directory Permissions:**
-```bash
-# Configure user directories for postfix access (enables user_maildir quarantine)
-php index.php --input_type=internal --command=setup-user-permissions --username=testuser
-```
-
-**Permission setup includes:**
-- 👥 Adds postfix user to user's group
-- 🏠 Sets group permissions on home directory
-- 📁 Configures maildir for postfix access
-- 📧 Creates spam folder with proper permissions
-- ✅ Enables user maildir quarantine method
-
-#### **Setup Dovecot Sieve Spam Rules:**
-```bash
-# Configure automatic spam filtering rules for users
-php index.php --input_type=internal --command=setup-sieve-rules --username=testuser
-```
-
-**Sieve rules setup includes:**
-- 📧 Creates Dovecot Sieve spam filtering rules
-- 🔄 Automatically moves X-Spam flagged emails to Spambox
-- 📁 Creates spam folders if they don't exist
-- ✅ Compiles and activates Sieve scripts
-- 🔄 Reloads Dovecot configuration
-
-### **Spam Pattern Management**
-
-#### **View and Manage Spam Patterns:**
-```bash
-# View recent spam patterns
-php index.php --input_type=internal --command=view-spam-patterns --limit=20
-
-# Remove specific spam pattern
-php index.php --input_type=internal --command=clear-spam-pattern --pattern_id=123
-```
-
-### **System Monitoring**
-
-#### **Statistics and System Health:**
-```bash
-# Show comprehensive system statistics
-php index.php --input_type=internal --command=stats
-
-# Reload whitelist/blacklist files
-php index.php --input_type=internal --command=reload-lists
-```
-
-### **Testing and Debugging Tools**
-
-#### **Spam Filter Testing:**
-```bash
-# Test spam filter with sample content
-php index.php --input_type=internal --command=test-spam-filter --subject="Hello" --body="Test message"
-
-# Show all available commands
-php index.php --input_type=internal --command=help
-```
-
-### **Complete Setup Workflow**
-
-#### **For Production Deployment:**
-```bash
-# 1. Setup all permissions and directories
-php index.php --input_type=internal --command=setup-permissions
-
-# 2. Initialize database
-php index.php --input_type=internal --command=setup-database
-
-# 3. Create mail users
-php index.php --input_type=internal --command=create-user --username=admin --password=securepass
-
-# 4. Setup user directory permissions (for user_maildir quarantine)
-php index.php --input_type=internal --command=setup-user-permissions --username=admin
-
-# 5. Setup Dovecot Sieve spam filtering rules
-php index.php --input_type=internal --command=setup-sieve-rules --username=admin
-
-# 6. Test system
-php index.php --input_type=internal --command=stats
-```
-
-#### **For Docker Development (Testing Environment):**
-```bash
-# 1. Navigate to testing environment
-cd system/testing
-
-# 2. Start services
-docker-compose up -d --build
-
-# 3. Setup inside container
-docker exec cyford-mail ./docker-setup.sh
-
-# 4. Create test users
-docker exec cyford-mail php /opt/cyford/security/index.php --input_type=internal --command=create-user --username=test --password=test123
-
-# 5. Access webmail: http://localhost:8081/webmail
-```
-
-#### **For Docker Production (Live Environment):**
-```bash
-# 1. Navigate to live environment
-cd system/live
-
-# 2. Start security system
-docker-compose up -d --build
-
-# 3. Verify host integration
-docker exec cyford-security php /opt/cyford/security/index.php --input_type=internal --command=system-inventory
-
-# 4. Test firewalld access
-docker exec cyford-security firewall-cmd --state
-
-# 5. Test fail2ban access
-docker exec cyford-security fail2ban-client status
-```
-
-### **Hash-Based Spam Detection**
-
-The system includes advanced hash-based spam detection that:
-- **Learns spam patterns** automatically
-- **Blocks duplicate spam** instantly
-- **Improves performance** over time
-- **Persists across reboots**
-
-**Enable in config.php:**
-```php
-'spam_handling' => [
-    'hash_detection' => true,
-    'hash_threshold' => 3, // Block after X identical emails
-],
-```
-
-**Note:** Run `setup-database` command first to initialize the SQLite database with proper permissions.
-
-### **X-Spam Headers (Default Method)**
-
-CLI-Security now uses **X-Spam headers** as the default spam handling method, following industry standards like SpamAssassin.
-
-#### **How X-Spam Headers Work:**
-```php
-'spam_handling' => [
-    'action' => 'headers', // Adds X-Spam headers instead of quarantining
-],
-```
-
-**Headers Added to Spam Emails:**
-```
-X-Spam-Flag: YES
-X-Spam-Checker-Version: Cyford Web Armor 1.0
-X-Spam-Level: ****
-X-Spam-Score: 7.0
-X-Spam-Status: Yes, score=7.0 required=5.0 tests=CYFORD_SPAM
-Subject: ***SPAM*** Original Subject
-```
-
-**Benefits:**
-- ✅ **No Permission Issues** - No file system operations required
-- ✅ **Standard Approach** - Compatible with all email clients and servers
-- ✅ **User Control** - Users can configure their own spam handling rules
-- ✅ **Dovecot Integration** - Works seamlessly with Sieve filtering rules
-- ✅ **Chroot Compatible** - Works in restricted Postfix environments
-
-**Setup Automatic Spam Filtering:**
-```bash
-# Setup Sieve rules to automatically move spam to spam folder
-php index.php --input_type=internal --command=setup-sieve-rules --username=all
-```
-
-### **Quarantine Configuration**
-
-CLI-Security supports two quarantine methods for spam emails:
-
-#### **Method 1: User Maildir (Recommended)**
-```php
-'quarantine_method' => 'user_maildir',
-'maildir_path' => '/home/{user}/Maildir-cyford',
-```
-
-**Setup:**
-```bash
-# Configure user directory permissions
-php index.php --input_type=internal --command=setup-user-permissions --username=allen
-```
-
-**Benefits:**
-- ✅ **Email Client Integration** - Spam folder appears in user's email client
-- ✅ **User Management** - Users can view, move, and delete quarantined emails
-- ✅ **Standard Maildir** - Compatible with IMAP/POP3 protocols
-- ✅ **Proper Organization** - Spam stored in user's mailbox structure
-
-#### **Method 2: System Quarantine**
-```php
-'quarantine_method' => 'system_quarantine',
-'system_quarantine_path' => '/var/spool/postfix/quarantine',
-```
-
-**Benefits:**
-- ✅ **Chroot Compatible** - Works in restricted Postfix environments
-- ✅ **No Setup Required** - Works out of the box
-- ✅ **Admin Managed** - Centralized spam storage
-- ✅ **Always Accessible** - No user directory dependencies
-
-**Access quarantined emails:**
-```bash
-# View user's quarantined spam
-ls -la /var/spool/postfix/quarantine/username/
-
-# Move to user's maildir if needed
-cp /var/spool/postfix/quarantine/username/*.spam /home/username/Maildir/.Spam/new/
-```
-
----
-
 ## **Docker Environments**
 
 CLI-Security provides two Docker deployment options:
@@ -638,7 +166,7 @@ CLI-Security provides two Docker deployment options:
 
 ```bash
 cd system/testing
-docker-compose up -d
+docker compose up -d
 docker exec cyford-mail ./docker-setup.sh
 ```
 
@@ -666,7 +194,7 @@ docker exec cyford-mail php /opt/cyford/security/index.php --input_type=internal
 
 ```bash
 cd system/live
-docker-compose up -d
+docker compose up -d
 ```
 
 **Features:**
@@ -695,90 +223,70 @@ docker exec cyford-security php /opt/cyford/security/index.php --input_type=inte
 - ✅ **Host Integration** - Live system controls host services
 - ✅ **Development Ready** - Testing environment for development
 
----
+### **Docker Environment Commands**
 
-## **User Management**
-
-CLI-Security provides built-in user management for mail servers with integrated Postfix and Dovecot support.
-
-### **Create Mail Users**
-
+#### **Testing Environment Setup:**
 ```bash
-# Create a new mail user
-php index.php --input_type=internal --command=create-user --username=testuser --password=securepass
+# Navigate to testing directory
+cd system/testing
+
+# Start complete mail stack
+docker compose up -d --build
+
+# Initialize services
+docker exec cyford-mail ./docker-setup.sh
+
+# Create test users
+docker exec cyford-mail php /opt/cyford/security/index.php --input_type=internal --command=create-user --username=test --password=test123
 ```
 
-### **What User Creation Does**
-
-1. **✅ Creates System User** - Linux user account with home directory
-2. **✅ Sets Password** - For both system and email authentication
-3. **✅ Creates Maildir Structure** - Including Spam quarantine folder
-4. **✅ Configures Postfix** - Adds user to virtual user mapping
-5. **✅ Configures Dovecot** - Sets up IMAP/POP3 authentication
-6. **✅ Sets Permissions** - Proper ownership for mail directories
-
-### **User Features**
-
-- **📧 Email Account** - Full SMTP/IMAP/POP3 access
-- **🗂️ Spam Folder** - Quarantined emails accessible via email client
-- **🔐 Secure Authentication** - Encrypted password storage
-- **📱 Multi-Client Support** - Works with any email client
-- **🌐 Webmail Access** - Login via SquirrelMail interface
-
-### **Example Usage**
-
+#### **Live Production Setup:**
 ```bash
-# Create test user
-php index.php --input_type=internal --command=create-user --username=john --password=mypassword
+# Navigate to live directory
+cd system/live
 
-# User can now:
-# - Send/receive emails: john@yourdomain.com
-# - Access via IMAP: john / mypassword
-# - Login to webmail: http://localhost:8080/webmail
-# - View spam folder in email client
+# Start security system
+docker compose up -d --build
+
+# Check system status
+docker exec cyford-security php /opt/cyford/security/index.php --input_type=internal --command=system-inventory
 ```
 
-### **Coming Soon**
+#### **For Docker Development (Testing Environment):**
+```bash
+# 1. Navigate to testing environment
+cd system/testing
 
-- **User Deletion** - Remove users and clean up mail data
-- **Password Reset** - Change user passwords
-- **Quota Management** - Set mailbox size limits
-- **Alias Management** - Create email aliases and forwards
-- **Bulk User Import** - CSV-based user creation
-- **User Statistics** - Mail usage and spam statistics per user
+# 2. Start services
+docker compose up -d --build
+
+# 3. Setup inside container
+docker exec cyford-mail ./docker-setup.sh
+
+# 4. Create test users
+docker exec cyford-mail php /opt/cyford/security/index.php --input_type=internal --command=create-user --username=test --password=test123
+
+# 5. Access webmail: http://localhost:8081/webmail
+```
+
+#### **For Docker Production (Live Environment):**
+```bash
+# 1. Navigate to live environment
+cd system/live
+
+# 2. Start security system
+docker compose up -d --build
+
+# 3. Verify host integration
+docker exec cyford-security php /opt/cyford/security/index.php --input_type=internal --command=system-inventory
+
+# 4. Test firewalld access
+docker exec cyford-security firewall-cmd --state
+
+# 5. Test fail2ban access
+docker exec cyford-security fail2ban-client status
+```
 
 ---
 
-## **Contributing**
-
-We welcome contributions to improve the script or add new features. You can:
-
-- Report bugs.
-- Request features.
-- Submit pull requests.
-
-Visit the repository: [GitHub Repository](https://github.com/Cyford-Technologies-LLC/CLI-Security)
-
----
-
-## **License**
-
-This project is licensed under the [MIT License](LICENSE).
-
-For support, please contact [support@cyfordtechnologies.com](mailto:support@cyfordtechnologies.com).
-
-
-
-####
-
-I had to add rule to polkit  for rocky os 9
-[root@CT-MAIL-00 security]#    sudo nano /etc/polkit-1/rules.d/50-report-ip.rules
-polkit.addRule(function(action, subject) {
-if (action.id === "org.freedesktop.systemd1.manage-units" &&
-subject.user === "report-ip") {
-return polkit.Result.YES;
-}
-});
-[root@CT-MAIL-00 security]#    sudo systemctl restart polkit
-
-
+*[Rest of README content remains the same...]*

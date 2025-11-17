@@ -258,7 +258,7 @@ deploy_live() {
     echo "  - External Postfix integration"
     echo ""
     echo "📊 Check status:"
-    echo "  docker exec cyford-security php /opt/cyford/security/index.php --input_type=internal --command=stats"
+    echo "  docker exec CLI-Security php /opt/cyford/security/index.php --input_type=internal --command=stats"
 }
 
 # Manual setup

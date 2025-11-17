@@ -3,7 +3,7 @@ version: '3.8'
 services:
   cyford-security:
     build: .
-    container_name: cyford-security
+    container_name: CLI-Security
     hostname: security.cyford.local
     volumes:
       - ../../:/opt/cyford/security
