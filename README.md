@@ -43,12 +43,12 @@ Verify Composer installation:
 
 1. Clone the CLI-Security repository to your system:
    ```sh
-   sudo git clone https://github.com/Cyford-Technologies-LLC/CLI-Security.git /usr/local/share/cyford/security
+   sudo git clone https://github.com/Cyford-Technologies-LLC/CLI-Security.git /opt/cyford/security
    ```
 
 2. Navigate into the project directory:
    ```sh
-   cd /usr/local/share/cyford/security
+   cd /opt/cyford/security
    ```
 
 3. Install PHP dependencies using Composer:
@@ -59,8 +59,8 @@ Verify Composer installation:
 ### **4. Set up Symlinks**
 
 Create a symlink for easier and global execution of the script:
-sh sudo ln -s /usr/local/share/cyford/security/index.php /usr/local/bin/cyford-report sudo chmod +x
-/usr/local/share/cyford/security/index.php
+sh sudo ln -s /opt/cyford/security/index.php /usr/local/bin/cyford-report sudo chmod +x
+/opt/cyford/security/index.php
 
 You can now run the script from anywhere using:
 sh cyford-report
@@ -69,7 +69,7 @@ sh cyford-report
 
 Before running the project, configure it by editing `config.php` in the project directory. Open the file for manual
 changes:
-sh nano /usr/local/share/cyford/security/config.php
+sh nano /opt/cyford/security/config.php
 
 ### **Configurable Fields in `config.php`**
 
@@ -150,7 +150,7 @@ If you prefer manual setup or need to troubleshoot:
    
    # Security filter service
    security-filter unix - n n - - pipe
-     flags=Rq user=report-ip argv=/usr/bin/php /usr/local/share/cyford/security/index.php --input_type=postfix --ips=${client_address} --categories=3
+     flags=Rq user=report-ip argv=/usr/bin/php /opt/cyford/security/index.php --input_type=postfix --ips=${client_address} --categories=3
    ```
 
 3. **Remove any old global content_filter from main.cf** (if present):
@@ -169,7 +169,7 @@ If you prefer manual setup or need to troubleshoot:
 
 #### **Spam Handling Configuration**
 
-Configure spam handling in `/usr/local/share/cyford/security/config.php`:
+Configure spam handling in `/opt/cyford/security/config.php`:
 
 ```php
 'postfix' => [
@@ -234,7 +234,7 @@ php 'errors' => [ 'report_errors' => 1, ],
 - **Permission Issues**:
   Ensure files and scripts are executable:
    ```sh
-   sudo chmod +x /usr/local/share/cyford/security/index.php
+   sudo chmod +x /opt/cyford/security/index.php
    ```
 
 - **Postfix Configuration Fails**:
@@ -395,7 +395,7 @@ docker-compose up -d
 docker exec -it cyford-mail ./docker-setup.sh
 
 # 4. Create test users
-docker exec -it cyford-mail php /usr/local/share/cyford/security/index.php --input_type=internal --command=create-user --username=test --password=test123
+docker exec -it cyford-mail php /opt/cyford/security/index.php --input_type=internal --command=create-user --username=test --password=test123
 ```
 
 ### **Hash-Based Spam Detection**

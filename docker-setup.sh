@@ -3,7 +3,7 @@ echo "🚀 Setting up Cyford Security Mail Stack..."
 
 # Setup permissions
 echo "📋 Setting up permissions..."
-cd /usr/local/share/cyford/security
+cd /opt/cyford/security
 php index.php --input_type=internal --command=setup-permissions
 
 # Setup database

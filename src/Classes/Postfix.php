@@ -421,7 +421,7 @@ $publicIP:smtp inet  n       -       n       -       -       smtpd
 
 # Security filter service
 security-filter unix - n n - - pipe
-  flags=Rq user=report-ip argv=/usr/bin/php /usr/local/share/cyford/security/index.php --input_type=postfix --recipient=\${{recipient}} --ips=\${{client_address}} --categories=3
+  flags=Rq user=report-ip argv=/usr/bin/php /opt/cyford/security/index.php --input_type=postfix --recipient=\${{recipient}} --ips=\${{client_address}} --categories=3
 EOF;
     }
 
@@ -1762,9 +1762,9 @@ EOF;
 
         // Check whitelist files
         $whitelistFiles = [
-            'emails' => $this->config['whitelist']['emails_file'] ?? '/usr/local/share/cyford/security/lists/whitelist_emails.txt',
-            'domains' => $this->config['whitelist']['domains_file'] ?? '/usr/local/share/cyford/security/lists/whitelist_domains.txt',
-            'ips' => $this->config['whitelist']['ips_file'] ?? '/usr/local/share/cyford/security/lists/whitelist_ips.txt',
+            'emails' => $this->config['whitelist']['emails_file'] ?? '/opt/cyford/security/lists/whitelist_emails.txt',
+            'domains' => $this->config['whitelist']['domains_file'] ?? '/opt/cyford/security/lists/whitelist_domains.txt',
+            'ips' => $this->config['whitelist']['ips_file'] ?? '/opt/cyford/security/lists/whitelist_ips.txt',
         ];
 
         // Check the email allowlist
@@ -1903,9 +1903,9 @@ EOF;
 
         // Check blacklist files
         $blacklistFiles = [
-            'emails' => $this->config['blacklist']['emails_file'] ?? '/usr/local/share/cyford/security/lists/blacklist_emails.txt',
-            'domains' => $this->config['blacklist']['domains_file'] ?? '/usr/local/share/cyford/security/lists/blacklist_domains.txt',
-            'ips' => $this->config['blacklist']['ips_file'] ?? '/usr/local/share/cyford/security/lists/blacklist_ips.txt',
+            'emails' => $this->config['blacklist']['emails_file'] ?? '/opt/cyford/security/lists/blacklist_emails.txt',
+            'domains' => $this->config['blacklist']['domains_file'] ?? '/opt/cyford/security/lists/blacklist_domains.txt',
+            'ips' => $this->config['blacklist']['ips_file'] ?? '/opt/cyford/security/lists/blacklist_ips.txt',
         ];
 
         // Check email blacklist

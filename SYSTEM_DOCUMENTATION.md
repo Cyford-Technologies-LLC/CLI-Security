@@ -299,11 +299,11 @@ INSERT INTO detection_algorithms (name, threat_category, detection_type, target,
 - Task queue for background processing
 
 ## File Locations
-- Main entry: `/usr/local/share/cyford/security/index.php`
-- Classes: `/usr/local/share/cyford/security/src/Classes/`
-- Config: `/usr/local/share/cyford/security/config.json`
+- Main entry: `/opt/cyford/security/index.php`
+- Classes: `/opt/cyford/security/src/Classes/`
+- Config: `/opt/cyford/security/config.json`
 - Logs: `/var/log/cyford-security/`
-- Database: SQLite at `/usr/local/share/cyford/security/data/security.db`
+- Database: SQLite at `/opt/cyford/security/data/security.db`
 
 ## Next Steps
 1. Convert API calls from GET to POST

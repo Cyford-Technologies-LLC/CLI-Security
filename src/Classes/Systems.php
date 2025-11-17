@@ -399,7 +399,7 @@ class Systems
         echo "🔧 Setting up task queue system...\n";
         
         // Create task queue in project directory (chroot accessible)
-        $projectTasksFile = '/usr/local/share/cyford/security/tasks.json';
+        $projectTasksFile = '/opt/cyford/security/tasks.json';
         if (!file_exists($projectTasksFile)) {
             file_put_contents($projectTasksFile, '[]');
         }
@@ -926,7 +926,7 @@ function runScheduledCommand($data) {
     $args = $data['args'] ?? [];
     
     // Build command string
-    $cmdStr = 'php /usr/local/share/cyford/security/index.php --input_type=internal --command=' . escapeshellarg($command);
+    $cmdStr = 'php /opt/cyford/security/index.php --input_type=internal --command=' . escapeshellarg($command);
     
     foreach ($args as $key => $value) {
         $cmdStr .= ' --' . escapeshellarg($key) . '=' . escapeshellarg($value);

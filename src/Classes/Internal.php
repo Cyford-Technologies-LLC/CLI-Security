@@ -668,7 +668,7 @@ class Internal
             
             // 5. Setup project directory
             echo "📂 Setting up project directory...\n";
-            $projectDir = '/usr/local/share/cyford/security';
+            $projectDir = '/opt/cyford/security';
             exec("chown -R report-ip:postfix {$projectDir}");
             exec("find {$projectDir} -type d -exec chmod 775 {} \;");
             exec("find {$projectDir} -type f -exec chmod 664 {} \;");
@@ -879,17 +879,17 @@ RUN apt-get update && apt-get install -y \
 RUN useradd -r -s /bin/false report-ip
 
 # Create directory structure
-RUN mkdir -p /usr/local/share/cyford/security \
+RUN mkdir -p /opt/cyford/security \
     && mkdir -p /var/log/cyford-security \
     && mkdir -p /var/spool/cyford-security
 
 # Copy CLI Security files
-COPY . /usr/local/share/cyford/security/
+COPY . /opt/cyford/security/
 
 # Set permissions
-RUN chown -R report-ip:report-ip /usr/local/share/cyford/security \
+RUN chown -R report-ip:report-ip /opt/cyford/security \
     && chown -R report-ip:report-ip /var/log/cyford-security \
-    && chmod -R 755 /usr/local/share/cyford/security
+    && chmod -R 755 /opt/cyford/security
 
 # Configure SquirrelMail
 RUN ln -s /usr/share/squirrelmail /var/www/html/webmail \
@@ -942,7 +942,7 @@ services:
     volumes:
       - mail_data:/var/mail
       - mail_logs:/var/log
-      - ./:/usr/local/share/cyford/security
+      - ./:/opt/cyford/security
     environment:
       - HOSTNAME=mail.cyford.local
       - DOMAIN=cyford.local
@@ -966,7 +966,7 @@ echo "🚀 Setting up Cyford Security Mail Stack..."
 
 # Setup permissions
 echo "📋 Setting up permissions..."
-cd /usr/local/share/cyford/security
+cd /opt/cyford/security
 php index.php --input_type=internal --command=setup-permissions
 
 # Setup database
@@ -2305,7 +2305,7 @@ SIEVE;
         }
 
         // Path to your script
-        $scriptPath = "/usr/local/share/cyford/security/index.php";
+        $scriptPath = "/opt/cyford/security/index.php";
 
         // If the script path doesn't exist, try to find it
         if (!file_exists($scriptPath)) {
@@ -2359,7 +2359,7 @@ SIEVE;
             $scriptPath = $_SERVER['SCRIPT_FILENAME'] ?? null;
             if (!$scriptPath) {
                 // Try to determine script path
-                $scriptPath = realpath( '/usr/local/share/cyford/security/index.php');
+                $scriptPath = realpath( '/opt/cyford/security/index.php');
             }
 
             if (!file_exists($scriptPath)) {
@@ -2445,7 +2445,7 @@ SIEVE;
      * @param string $scriptPath Path to the script that will handle the reporting
      * @return bool Success status
      */
-    public function setupScriptReporting(string $scriptPath = "/usr/local/share/cyford/security/index.php"): bool
+    public function setupScriptReporting(string $scriptPath = "/opt/cyford/security/index.php"): bool
     {
         // Create a custom action configuration for Fail2Ban
         $actionFile = '/etc/fail2ban/action.d/cyford-report-script.conf';

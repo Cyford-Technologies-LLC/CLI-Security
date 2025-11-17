@@ -100,14 +100,14 @@ return [
         'file_path' => '/var/log/cyford-security/application.log',
     ],
     'whitelist' => [
-        'ips_file' => '/usr/local/share/cyford/security/lists/whitelist_ips.txt',
-        'domains_file' => '/usr/local/share/cyford/security/lists/whitelist_domains.txt',
-        'emails_file' => '/usr/local/share/cyford/security/lists/whitelist_emails.txt',
+        'ips_file' => '/opt/cyford/security/lists/whitelist_ips.txt',
+        'domains_file' => '/opt/cyford/security/lists/whitelist_domains.txt',
+        'emails_file' => '/opt/cyford/security/lists/whitelist_emails.txt',
     ],
     'blacklist' => [
-        'ips_file' => '/usr/local/share/cyford/security/lists/blacklist_ips.txt',
-        'domains_file' => '/usr/local/share/cyford/security/lists/blacklist_domains.txt',
-        'emails_file' => '/usr/local/share/cyford/security/lists/blacklist_emails.txt',
+        'ips_file' => '/opt/cyford/security/lists/blacklist_ips.txt',
+        'domains_file' => '/opt/cyford/security/lists/blacklist_domains.txt',
+        'emails_file' => '/opt/cyford/security/lists/blacklist_emails.txt',
         'action' => 'reject', // Options: 'reject', 'quarantine', 'tag'
         'report_to_fail2ban' => true,
         'fail2ban_jail' => 'cyford-email',

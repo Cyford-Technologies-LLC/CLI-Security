@@ -65,7 +65,7 @@ RUN chown -R appuser:appuser /app/venv
 
 # --- Begin user-level operations ---
 # Switch to the non-root user
-USER appuser
+USER appusergot
 
 # Activate the virtual environment
 ENV PATH="/app/venv/bin:$PATH"

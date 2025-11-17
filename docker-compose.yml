@@ -15,7 +15,7 @@ services:
     volumes:
       - mail_data:/var/mail
       - mail_logs:/var/log
-      - ./:/usr/local/share/cyford/security
+      - ./:/opt/cyford/security
     environment:
       - HOSTNAME=mail.cyford.local
       - DOMAIN=cyford.local
