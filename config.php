@@ -32,12 +32,14 @@ return [
     'postfix' => [
         'enable_postfix_integration' => true, // Enable postfix integration
         'requeue_method' => 'smtp', // Options: smtp, sendmail, postdrop, postpickup, dovecot-lda (SMTP recommended for chroot compatibility)
+        'smtp_reinject_host' => '127.0.0.1', // Host to re-inject clean mail (bypasses content filter)
+        'smtp_reinject_port' => 10026, // Port for re-injection (must have content_filter= in master.cf)
         'spam_handling_method' => 'maildir', // Options: maildir, requeue (maildir uses task queue for chroot)
-        'main_config' => '/etc/postfix/main.cf', // Path to Postfix main configuration file
-        'master_config' => '/etc/postfix/master.cf', // Path to Postfix master configuration file
-        'postfix_command' => '/usr/sbin/postfix', // Path to Postfix executable
+        'main_config' => '/root/Cyford_Infastructure/docker/email_server/postfix/main.cf', // Postfix config (host path to Docker-mounted file)
+        'master_config' => '/root/Cyford_Infastructure/docker/email_server/postfix/master.cf', // Postfix master config
+        'postfix_command' => '/bin/true', // Postfix runs in Docker; this host binary just satisfies the constructor check
         'allow_modification' => true, // Set to true to allow automatic configuration changes
-        'backup_directory' => '/var/backups/postfix', // Path to store configuration file backups
+        'backup_directory' => '/var/lib/cyford-security/backups', // Path to store configuration file backups
         'spam_handling' => [
             'action' => 'quarantine', // Options: 'reject', 'quarantine', 'allow', 'headers'
             'bounce_message' => 'Your message has been rejected due to spam content by Cyford Web Armor. Please contact the administrator if you believe this is an error.',
@@ -84,7 +86,7 @@ return [
     ],
     'database' => [
         'type' => 'sqlite', // Portable database, no installation required
-        'path' => '/var/spool/postfix/cyford-security.db', // SQLite database file (persistent and chroot accessible)
+        'path' => '/var/lib/cyford-security/security.db', // SQLite database file
         'cache_ttl' => 300, // Cache time-to-live in seconds (5 minutes)
     ],
     'hash' => [
@@ -93,8 +95,8 @@ return [
         'secondary_key_path' => '/etc/cyford-security/keys/secondary.key',
     ],
     'task_queue' => [
-        'queue_file' => '/var/spool/postfix/cyford-tasks.json', // Task queue file (chroot accessible)
-        'backup_queue_file' => '/var/spool/cyford-security/tasks.json', // Legacy location
+        'queue_file' => '/var/lib/cyford-security/tasks.json', // Task queue file
+        'backup_queue_file' => '/var/lib/cyford-security/tasks.json.bak',
     ],
     'log' => [
         'file_path' => '/var/log/cyford-security/application.log',

@@ -361,15 +361,9 @@ class Postfix
             if ($this->config['postfix']['spam_handling']['add_footer'] ?? false) {
                 $emailData = $this->addFooterIfConfigured($emailData);
             }
-            $this->requeueEmail($emailData, $recipient , $logger);
+            $this->requeueEmail($emailData, $recipient, $logger);
+            return;
         }
-
-        $logger->info("Email is clean of spam. Proceeding with requeue.");
-
-        // Add footer if configured
-        $emailData = $this->addFooterIfConfigured($emailData);
-
-        $this->requeueEmail($emailData, $recipient, $logger);
     }
 
 
@@ -698,9 +692,9 @@ EOF;
      */
     private function requeueWithSMTP(string $emailData, string $recipient, $logger): void
     {
-        $smtpHost = '127.0.0.1';
-        $smtpPort = 25;
-        
+        $smtpHost = $this->config['postfix']['smtp_reinject_host'] ?? '127.0.0.1';
+        $smtpPort = $this->config['postfix']['smtp_reinject_port'] ?? 10026;
+
         $logger->info("Connecting to SMTP server at $smtpHost:$smtpPort");
         
         $socket = fsockopen($smtpHost, $smtpPort, $errno, $errstr, 30);
